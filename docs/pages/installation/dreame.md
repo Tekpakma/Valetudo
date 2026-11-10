@@ -295,7 +295,7 @@ To do that, it needs to be turned off first.
 
 #### Get the config value
 
-To get the FEL recon package for your robot, navigate to <a href="https://builder.dontvacuum.me/nextgen/dust-fel-mr813.tar.gz" rel="noopener" target="_blank">the Dustfab</a>
+To get the FEL recon package for your robot, navigate to <a href="https://fab.valetudo.cloud" rel="noopener" target="_blank">the Dustfab</a>
 and navigate to the builder for your model of robot.
 
 There will be a banner below the picture of the model you can click on to download the right tarball for that model.
@@ -520,6 +520,12 @@ The next step is `oem prep`:
 ```
 ~/Downloads/dreame.vacuum.r2228_3407_fel$ ./valetudo-helper-felroot-amd64 oem prep
 [*] OKAY
+```
+
+Following that, we run `flash toc1 toc1.img`:
+```
+~/Downloads/dreame.vacuum.r2228_3407_fel$ ./valetudo-helper-felroot-amd64 flash toc1 toc1.img
+[*] sending 'toc1.img' (1490944 bytes)
 ```
 
 With that done, now we will flash the partitions.<br/>
