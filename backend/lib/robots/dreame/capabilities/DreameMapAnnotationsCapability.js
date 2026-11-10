@@ -12,6 +12,7 @@ class DreameMapAnnotationsCapability extends MapAnnotationsCapability {
      * @param {object} options
      * @param {import("../DreameValetudoRobot")} options.robot
      * @param {Array<import("../../../entities/core/ValetudoMapAnnotation").ValetudoMapAnnotationType>} options.supportedAnnotationTypes
+     * @param {boolean} [options.lowClearanceSupported]
      *
      * @param {object} options.miot_actions
      * @param {object} options.miot_actions.map_edit
@@ -30,6 +31,7 @@ class DreameMapAnnotationsCapability extends MapAnnotationsCapability {
 
         this.miot_actions = options.miot_actions;
         this.miot_properties = options.miot_properties;
+        this.lowClearanceSupported = options.lowClearanceSupported === true;
     }
 
     /**
@@ -155,6 +157,47 @@ class DreameMapAnnotationsCapability extends MapAnnotationsCapability {
                     throw new RobotFirmwareError("Got error " + res.out[0].value + " while saving map annotations.");
             }
         }
+    }
+
+    /**
+     * Replace the complete set of manual low-clearance polygons.
+     * @param {Array<Array<{x: number, y: number}>>} areas
+     * @returns {Promise<void>}
+     */
+    async setLowClearanceAreas(areas) {
+        if (!this.lowClearanceSupported) {
+            throw new Error("Low-clearance editing is not enabled for this robot");
+        }
+        if (!Array.isArray(areas) || areas.some(area =>
+            !Array.isArray(area) || area.length !== 4 || area.some(point =>
+                !point || !Number.isInteger(point.x) || !Number.isInteger(point.y) ||
+                point.x < 0 || point.x > 6553 || point.y < 0 || point.y > 6553
+            )
+        )) {
+            throw new Error("Each area must have four integer map-coordinate points");
+        }
+        const asa = areas.map(area => area.flatMap(point => {
+            const p = DreameMapParser.CONVERT_TO_DREAME_COORDINATES(point.x, point.y);
+            if (p.x < -32768 || p.x > 32767 || p.y < -32768 || p.y > 32767) {
+                throw new Error("Converted coordinate outside firmware range");
+            }
+            return [p.x, p.y];
+        }));
+        const res = await this.robot.sendCommand("action", {
+            did: this.robot.deviceId,
+            siid: this.miot_actions.map_edit.siid,
+            aiid: this.miot_actions.map_edit.aiid,
+            in: [{piid: this.miot_properties.mapDetails.piid, value: JSON.stringify({asa: asa})}]
+        });
+        if (!res || res.siid !== this.miot_actions.map_edit.siid ||
+            res.aiid !== this.miot_actions.map_edit.aiid || !Array.isArray(res.out) ||
+            res.out.length !== 1 || res.out[0].piid !== this.miot_properties.actionResult.piid) {
+            throw new RobotFirmwareError("Unrecognized firmware response to low-clearance edit");
+        }
+        if (res.out[0].value !== 0) {
+            throw new RobotFirmwareError("Firmware rejected low-clearance edit: " + res.out[0].value);
+        }
+        this.robot.pollMap();
     }
 }
 

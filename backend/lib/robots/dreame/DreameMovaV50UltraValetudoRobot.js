@@ -198,6 +198,7 @@ class DreameMovaV50UltraValetudoRobot extends DreameGen4ValetudoRobot {
 
         this.registerCapability(new capabilities.DreameMapAnnotationsCapability({
             robot: this,
+            lowClearanceSupported: true,
             supportedAnnotationTypes: [
                 ValetudoMapAnnotation.TYPE.THRESHOLD,
                 ValetudoMapAnnotation.TYPE.CURTAIN,

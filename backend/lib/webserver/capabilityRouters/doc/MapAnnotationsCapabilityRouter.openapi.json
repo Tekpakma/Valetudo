@@ -1,4 +1,22 @@
 {
+  "/api/v2/robot/capabilities/MapAnnotationsCapability/low_clearance": {
+    "put": {
+      "tags": ["MapAnnotationsCapability"],
+      "summary": "Replace all manually defined low-clearance areas",
+      "requestBody": {
+        "required": true,
+        "content": {"application/json": {"schema": {
+          "type": "object", "required": ["areas"], "additionalProperties": false,
+          "properties": {"areas": {"type": "array", "items": {
+            "type": "array", "minItems": 4, "maxItems": 4,
+            "items": {"type": "object", "required": ["x", "y"], "additionalProperties": false,
+              "properties": {"x": {"type": "integer"}, "y": {"type": "integer"}}}
+          }}}
+        }}}
+      },
+      "responses": {"200": {"$ref": "#/components/responses/200"}, "400": {"$ref": "#/components/responses/400"}}
+    }
+  },
   "/api/v2/robot/capabilities/MapAnnotationsCapability": {
     "put": {
       "tags": [

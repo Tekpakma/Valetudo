@@ -3,6 +3,17 @@ const ValetudoMapAnnotation = require("../../entities/core/ValetudoMapAnnotation
 
 class MapAnnotationsCapabilityRouter extends CapabilityRouter {
     initRoutes() {
+        this.router.put("/low_clearance", this.validator, async (req, res) => {
+            try {
+                if (typeof this.capability.setLowClearanceAreas !== "function") {
+                    return res.sendStatus(404);
+                }
+                await this.capability.setLowClearanceAreas(req.body.areas);
+                res.sendStatus(200);
+            } catch (e) {
+                this.sendErrorResponse(req, res, e);
+            }
+        });
         this.router.put("/", this.validator, async (req, res) => {
             if (!Array.isArray(req.body)) {
                 return res.sendStatus(400);
