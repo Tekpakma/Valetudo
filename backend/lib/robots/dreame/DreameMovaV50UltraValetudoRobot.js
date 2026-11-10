@@ -287,6 +287,8 @@ class DreameMovaV50UltraValetudoRobot extends DreameGen4ValetudoRobot {
                 quirkFactory.getQuirk(DreameQuirkFactory.KNOWN_QUIRKS.DUSTBAG_DRYING),
                 quirkFactory.getQuirk(DreameQuirkFactory.KNOWN_QUIRKS.HURDLE_CROSSING_MODE),
                 quirkFactory.getQuirk(DreameQuirkFactory.KNOWN_QUIRKS.OBSTACLE_RETRY_CLEAN_LATER),
+                quirkFactory.getQuirk(DreameQuirkFactory.KNOWN_QUIRKS.AUTO_LDS_COVERAGE),
+                quirkFactory.getQuirk(DreameQuirkFactory.KNOWN_QUIRKS.LOW_LYING_AREA_FREQUENCY),
             ]
         }));
 

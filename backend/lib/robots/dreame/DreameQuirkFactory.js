@@ -1089,6 +1089,96 @@ class DreameQuirkFactory {
                         );
                     }
                 });
+            case DreameQuirkFactory.KNOWN_QUIRKS.AUTO_LDS_COVERAGE:
+                return new Quirk({
+                    id: id,
+                    title: "LiDAR Auto-Lowering",
+                    description: "Select if and how aggressively the robot should lower its LiDAR turret to clean below " +
+                            "low furniture. \"extreme\" covers more low areas but may cause the robot to get stuck more often.",
+                    options: ["off", "standard", "extreme"],
+                    getter: async () => {
+                        const res = await this.robot.miotHelper.readProperty(
+                            DreameMiotServices["GEN2"].MOP_EXPANSION.SIID,
+                            DreameMiotServices["GEN2"].MOP_EXPANSION.PROPERTIES.AUTO_LDS_COVERAGE.PIID
+                        );
+
+                        switch (res) {
+                            case 0:
+                                return "off";
+                            case 1:
+                                return "standard";
+                            case 2:
+                                return "extreme";
+                            default:
+                                throw new Error(`Received invalid value ${res}`);
+                        }
+                    },
+                    setter: async (value) => {
+                        let val;
+
+                        switch (value) {
+                            case "off":
+                                val = 0;
+                                break;
+                            case "standard":
+                                val = 1;
+                                break;
+                            case "extreme":
+                                val = 2;
+                                break;
+                            default:
+                                throw new Error(`Received invalid value ${value}`);
+                        }
+
+                        return this.robot.miotHelper.writeProperty(
+                            DreameMiotServices["GEN2"].MOP_EXPANSION.SIID,
+                            DreameMiotServices["GEN2"].MOP_EXPANSION.PROPERTIES.AUTO_LDS_COVERAGE.PIID,
+                            val
+                        );
+                    }
+                });
+            case DreameQuirkFactory.KNOWN_QUIRKS.LOW_LYING_AREA_FREQUENCY:
+                return new Quirk({
+                    id: id,
+                    title: "Low-lying Area Cleaning Frequency",
+                    description: "Select how often the robot should clean low-lying areas below furniture.",
+                    options: ["daily", "weekly"],
+                    getter: async () => {
+                        const res = await this.robot.miotHelper.readProperty(
+                            DreameMiotServices["GEN2"].MOP_EXPANSION.SIID,
+                            DreameMiotServices["GEN2"].MOP_EXPANSION.PROPERTIES.LOW_LYING_AREA_FREQUENCY.PIID
+                        );
+
+                        switch (res) {
+                            case 1:
+                                return "daily";
+                            case 0:
+                                return "weekly";
+                            default:
+                                throw new Error(`Received invalid value ${res}`);
+                        }
+                    },
+                    setter: async (value) => {
+                        let val;
+
+                        switch (value) {
+                            case "daily":
+                                val = 1;
+                                break;
+                            case "weekly":
+                                val = 0;
+                                break;
+                            default:
+                                throw new Error(`Received invalid value ${value}`);
+                        }
+
+                        return this.robot.miotHelper.writeProperty(
+                            DreameMiotServices["GEN2"].MOP_EXPANSION.SIID,
+                            DreameMiotServices["GEN2"].MOP_EXPANSION.PROPERTIES.LOW_LYING_AREA_FREQUENCY.PIID,
+                            val
+                        );
+                    }
+                });
             default:
                 throw new Error(`There's no quirk with id ${id}`);
         }
@@ -1119,7 +1209,9 @@ DreameQuirkFactory.KNOWN_QUIRKS = {
     DUSTBAG_DRYING: "9e194ec7-bc25-4187-8163-b796f213c3c3",
     HURDLE_CROSSING_MODE: "a8fcf6a3-80ed-4149-89ef-d81936b8e080",
     OBSTACLE_RETRY_CLEAN_LATER: "15f0a896-c563-4560-b897-a586bd33a312",
-    FAN_SPEED_ONE_TIME_TURBO: "017c40b7-dc24-48e8-a6e0-19d66528fa6d"
+    FAN_SPEED_ONE_TIME_TURBO: "017c40b7-dc24-48e8-a6e0-19d66528fa6d",
+    AUTO_LDS_COVERAGE: "5b0f6c1e-8a2d-4e7b-9c3f-2d6a1e4b8f70",
+    LOW_LYING_AREA_FREQUENCY: "e1d7a3c9-4f62-4b8e-a05d-7c9b2f3e6a14"
 };
 
 module.exports = DreameQuirkFactory;

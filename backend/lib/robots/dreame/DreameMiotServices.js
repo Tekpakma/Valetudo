@@ -639,6 +639,9 @@ module.exports = {
                 CLEAN_CARPET_FIRST: {
                     PIID: 2
                 },
+                AUTO_LDS_COVERAGE: {
+                    PIID: 3
+                },
                 HIGH_RES_MOP_DOCK_HEATER: {
                     PIID: 8
                 },
@@ -662,6 +665,9 @@ module.exports = {
                 },
                 DUSTBAG_AUTO_DRYING: {
                     PIID: 48
+                },
+                LOW_LYING_AREA_FREQUENCY: {
+                    PIID: 51
                 }
             }
         },
