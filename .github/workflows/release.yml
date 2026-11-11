@@ -17,6 +17,11 @@
               },
               { 'name': 'Install', 'run': 'npm ci' },
               {
+                'name': 'Use release tag as version',
+                'env': { 'VERSION': '${{ github.event.release.tag_name }}' },
+                'run': 'npm pkg set version="$VERSION"',
+              },
+              {
                 'name': 'Generate OpenAPI Docs',
                 'run': 'npm run build_openapi_schema',
               },
