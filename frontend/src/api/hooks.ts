@@ -154,7 +154,7 @@ import {
     fetchAutoEmptyDockAutoEmptyDurationControlProperties,
     fetchMapAnnotationsProperties,
     sendMapAnnotationsUpdate,
-    sendLowClearanceUpdate,
+    sendLowClearanceAreasUpdate,
 } from "./client";
 import {
     PresetSelectionState,
@@ -175,6 +175,7 @@ import {
     DoNotDisturbConfiguration,
     HighResolutionManualControlInteraction,
     HTTPBasicAuthConfiguration,
+    LowClearanceAreasPayload,
     ManualControlInteraction,
     MapSegmentationActionRequestParameters,
     MapSegmentEditJoinRequestParameters,
@@ -1920,14 +1921,17 @@ export const useMapAnnotationsMutation = (
     });
 };
 
-export const useLowClearanceMutation = (options?: UseMutationOptions<void, unknown, {areas: Array<Array<Point>>, expectedAreas: Array<Array<Point>>}>) => {
+export const useLowClearanceAreasMutation = (
+    options?: UseMutationOptions<void, unknown, LowClearanceAreasPayload>
+) => {
     const queryClient = useQueryClient();
+
     return useMutation({
-        mutationFn: sendLowClearanceUpdate,
+        mutationFn: sendLowClearanceAreasUpdate,
         onError: useOnCommandError(Capability.MapAnnotations),
         ...options,
         onSuccess: async (data, ...args) => {
-            await queryClient.invalidateQueries({queryKey: [QueryKey.Map]});
+            await queryClient.invalidateQueries({ queryKey: [QueryKey.Map] });
             await options?.onSuccess?.(data, ...args);
         },
     });

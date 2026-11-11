@@ -151,13 +151,11 @@ class DreameMapParser {
                 const rismResult = await DreameMapParser.PARSE(await DreameMapParser.PREPROCESS(additionalData.rism), MAP_DATA_TYPES.RISM);
 
                 if (rismResult instanceof mapEntities.ValetudoMap) {
-                    if (rismResult.metaData?.dreameVws !== undefined) {
-                        metaData.dreameVws = rismResult.metaData.dreameVws;
-                    }
-                    if (rismResult.metaData?.dreameLowClearanceEditable !== undefined) {
-                        metaData.dreameLowClearanceEditable = rismResult.metaData.dreameLowClearanceEditable;
-                        metaData.dreameLowClearance = rismResult.metaData.dreameLowClearance;
-                    }
+                    const hasLowClearanceAreas = (
+                        Array.isArray(additionalData.sneak_areas) ||
+                        Array.isArray(additionalData.sneak_areas_end)
+                    );
+
                     rismResult.entities.forEach(e => {
                         if (e instanceof mapEntities.PointMapEntity) {
                             if (e.type === mapEntities.PointMapEntity.TYPE.ROBOT_POSITION && parsedHeader.robot_position.valid === false) {
@@ -171,9 +169,12 @@ class DreameMapParser {
                                 e.type === mapEntities.PolygonMapEntity.TYPE.NO_GO_AREA ||
                                 e.type === mapEntities.PolygonMapEntity.TYPE.NO_MOP_AREA ||
                                 e.type === mapEntities.PolygonMapEntity.TYPE.CARPET ||
-                                e.type === mapEntities.PolygonMapEntity.TYPE.RAMP ||
-                                (e.type === mapEntities.PolygonMapEntity.TYPE.LOW_CLEARANCE &&
-                                    !Array.isArray(additionalData.sneak_areas) && !Array.isArray(additionalData.sneak_areas_end))
+                                e.type === mapEntities.PolygonMapEntity.TYPE.RAMP
+                            ) {
+                                entities.push(e);
+                            } else if (
+                                e.type === mapEntities.PolygonMapEntity.TYPE.LOW_CLEARANCE &&
+                                hasLowClearanceAreas === false // Low-clearance areas of the regular map take precedence
                             ) {
                                 entities.push(e);
                             }
@@ -221,6 +222,14 @@ class DreameMapParser {
 
                     if (rismResult.metaData?.dreamePendingMapChange !== undefined) {
                         metaData.dreamePendingMapChange = rismResult.metaData.dreamePendingMapChange;
+                    }
+
+                    if (rismResult.metaData?.dreameVws !== undefined) {
+                        metaData.dreameVws = rismResult.metaData.dreameVws;
+                    }
+
+                    if (rismResult.metaData?.dreameLowClearanceEditable !== undefined) {
+                        metaData.dreameLowClearanceEditable = rismResult.metaData.dreameLowClearanceEditable;
                     }
                 }
             }
@@ -290,7 +299,9 @@ class DreameMapParser {
             }
 
             if (additionalData.vws) {
+                // Required to not lose data such as impassable thresholds when editing map annotations
                 metaData.dreameVws = additionalData.vws;
+
                 if (Array.isArray(additionalData.vws.vwsl)) {
                     entities.push(
                         ...DreameMapParser.PARSE_LINES(
@@ -311,33 +322,16 @@ class DreameMapParser {
                 }
             }
 
-            const lowAreas = additionalData.sneak_areas_end ?? additionalData.sneak_areas;
-            if (Array.isArray(lowAreas)) {
-                metaData.dreameLowClearance = lowAreas.map(area => area && ({
-                    id: area.id, type: area.type, hide: area.hide, roi: area.roi
-                }));
-                metaData.dreameLowClearanceEditable = lowAreas.every(area =>
-                    area && (area.type === 0 || area.type === 1) && !(area.type === 1 && area.hide) &&
-                    Array.isArray(area.roi) && area.roi.length >= 6 && area.roi.length % 2 === 0 &&
-                    (area.type !== 1 || area.roi.length === 8) &&
-                    area.roi.every(value => Number.isInteger(value) && value >= -32768 && value <= 32767)
+            const lowClearanceAreas = additionalData.sneak_areas_end ?? additionalData.sneak_areas;
+            if (Array.isArray(lowClearanceAreas)) {
+                metaData.dreameLowClearanceEditable = DreameMapParser.ARE_LOW_CLEARANCE_AREAS_EDITABLE(lowClearanceAreas);
+
+                entities.push(
+                    ...DreameMapParser.PARSE_LOW_CLEARANCE_AREAS(
+                        parsedHeader,
+                        lowClearanceAreas
+                    )
                 );
-                for (const area of lowAreas) {
-                    if (!area || area.hide || !Array.isArray(area.roi) || area.roi.length < 6 || area.roi.length % 2 !== 0 ||
-                        !area.roi.every(Number.isFinite)) {
-                        continue;
-                    }
-                    const points = [];
-                    for (let i = 0; i < area.roi.length; i += 2) {
-                        const point = DreameMapParser.CONVERT_TO_VALETUDO_COORDINATES(area.roi[i], area.roi[i + 1]);
-                        points.push(point.x, point.y);
-                    }
-                    entities.push(new mapEntities.PolygonMapEntity({
-                        type: mapEntities.PolygonMapEntity.TYPE.LOW_CLEARANCE,
-                        points: points,
-                        metaData: {id: String(area.id), manual: area.type === 1, dreameRoi: area.roi}
-                    }));
-                }
             }
 
             if (additionalData.ct) {
@@ -820,6 +814,79 @@ class DreameMapParser {
         });
     }
 
+    static PARSE_LOW_CLEARANCE_AREAS(parsedHeader, areas) {
+        const entities = [];
+
+        areas.forEach(area => {
+            if (
+                !area ||
+                area.hide ||
+                !Array.isArray(area.roi) ||
+                area.roi.length < 6 ||
+                area.roi.length % 2 !== 0 ||
+                !area.roi.every(Number.isFinite)
+            ) {
+                return;
+            }
+
+            const points = [];
+            for (let i = 0; i < area.roi.length; i = i + 2) {
+                const point = DreameMapParser.CONVERT_TO_VALETUDO_COORDINATES(area.roi[i], area.roi[i + 1]);
+
+                points.push(point.x, point.y);
+            }
+
+            entities.push(new mapEntities.PolygonMapEntity({
+                type: mapEntities.PolygonMapEntity.TYPE.LOW_CLEARANCE,
+                points: points,
+                metaData: {
+                    id: String(area.id),
+                    manual: area.type === LOW_CLEARANCE_AREA_TYPES.MANUAL,
+                    dreameRoi: area.roi
+                }
+            }));
+        });
+
+        return entities;
+    }
+
+    /**
+     * Editing low-clearance areas means sending the full list of manual areas to the robot.
+     * If there is any manual area that we can't send back unchanged, it would be lost on edit.
+     *
+     * Therefore, editing is only possible if all areas are understood
+     *
+     * @param {Array<any>} areas
+     * @returns {boolean}
+     */
+    static ARE_LOW_CLEARANCE_AREAS_EDITABLE(areas) {
+        return areas.every(area => {
+            if (!area || !Array.isArray(area.roi)) {
+                return false;
+            }
+
+            switch (area.type) {
+                case LOW_CLEARANCE_AREA_TYPES.AUTOMATIC:
+                    break;
+                case LOW_CLEARANCE_AREA_TYPES.MANUAL:
+                    if (area.hide || area.roi.length !== 8) {
+                        return false;
+                    }
+                    break;
+                default:
+                    return false;
+            }
+
+            return (
+                area.roi.length >= 6 &&
+                area.roi.length % 2 === 0 &&
+                area.roi.every(value => {
+                    return Number.isInteger(value) && value >= -HALF_INT16 && value <= HALF_INT16_UPPER_HALF;
+                })
+            );
+        });
+    }
+
     /**
      * Uploaded dreame Maps are actually base64url strings of zlib compressed data
      *
@@ -863,6 +930,11 @@ const PIXEL_TYPES = Object.freeze({
 const FRAME_TYPES = Object.freeze({
     I: 73,
     P: 80
+});
+
+const LOW_CLEARANCE_AREA_TYPES = Object.freeze({
+    AUTOMATIC: 0,
+    MANUAL: 1
 });
 
 const PATH_REGEX = /(?<operator>[SMWL])(?<x>-?\d+),(?<y>-?\d+)/g;

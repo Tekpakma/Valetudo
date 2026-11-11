@@ -198,12 +198,13 @@ class DreameMovaV50UltraValetudoRobot extends DreameGen4ValetudoRobot {
 
         this.registerCapability(new capabilities.DreameMapAnnotationsCapability({
             robot: this,
-            lowClearanceSupported: true,
             supportedAnnotationTypes: [
                 ValetudoMapAnnotation.TYPE.THRESHOLD,
                 ValetudoMapAnnotation.TYPE.CURTAIN,
                 ValetudoMapAnnotation.TYPE.RAMP,
             ],
+            lowClearanceSupported: true,
+            incrementalUpdates: true,
             miot_actions: {
                 map_edit: {
                     siid: DreameMovaV50UltraValetudoRobot.MIOT_SERVICES.MAP.SIID,

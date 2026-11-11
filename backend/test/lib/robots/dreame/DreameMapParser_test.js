@@ -1,6 +1,7 @@
 const assert = require("node:assert");
 const fs = require("fs").promises;
 const path = require("path");
+const zlib = require("zlib");
 const { describe, it } = require("node:test");
 
 const DreameMapParser = require("../../../../lib/robots/dreame/DreameMapParser");
@@ -151,8 +152,63 @@ describe("DreameMapParser", () => {
         const data = await fs.readFile(path.join(__dirname, "/res/map/l10su_3031_giant.bin"));
         const expected = JSON.parse(await fs.readFile(path.join(__dirname, "/res/map/l10su_3031_giant.json"), { encoding: "utf-8" }));
         const actual = await DreameMapParser.PARSE(await DreameMapParser.PREPROCESS(data));
-        expected.metaData.dreameVws = {vwsl: []};
 
         assertParsedMap(actual, expected);
+    });
+
+    describe("low-clearance areas", () => {
+        /*
+            There's no real map with low-clearance areas in the test data yet.
+            Therefore, we're appending the relevant additional data to an existing map
+         */
+        const buildMap = async (additionalData) => {
+            const data = await fs.readFile(path.join(__dirname, "/res/map/d9_1058_no_segments.bin"));
+            const imageEnd = 27 + data.readInt16LE(19) * data.readInt16LE(21);
+
+            return Buffer.concat([
+                data.subarray(0, imageEnd),
+                Buffer.from(JSON.stringify(additionalData))
+            ]);
+        };
+        const ROI = [-118, -1578, 862, -1578, 862, -2008, -118, -2008];
+
+        it("parses automatic and manual low-clearance areas from the saved map", async () => {
+            const savedMap = await buildMap({
+                sneak_areas: [
+                    {id: 1, type: 0, roi: ROI},
+                    {id: 2, type: 1, roi: ROI}
+                ],
+                vws: {vwsl: [], npthrsd: [], ramp: []}
+            });
+            const data = await buildMap({
+                ris: 2,
+                rism: zlib.deflateSync(savedMap).toString("base64")
+            });
+
+            const actual = await DreameMapParser.PARSE(data);
+            const areas = actual.entities.filter(e => {
+                return e.type === "low_clearance";
+            });
+
+            assert.strictEqual(actual.metaData.dreameLowClearanceEditable, true);
+            assert.deepStrictEqual(actual.metaData.dreameVws, {vwsl: [], npthrsd: [], ramp: []});
+            assert.strictEqual(areas.length, 2);
+            assert.strictEqual(areas[0].metaData.manual, false);
+            assert.strictEqual(areas[1].metaData.manual, true);
+            assert.deepStrictEqual(areas[1].points, [3265, 3435, 3363, 3435, 3363, 3478, 3265, 3478]);
+        });
+
+        it("disables editing if there is a hidden manual area that can't be preserved", async () => {
+            const data = await buildMap({
+                sneak_areas: [
+                    {id: 1, type: 1, hide: true, roi: ROI}
+                ]
+            });
+
+            const actual = await DreameMapParser.PARSE(data);
+
+            assert.strictEqual(actual.metaData.dreameLowClearanceEditable, false);
+            assert.strictEqual(actual.entities.filter(e => e.type === "low_clearance").length, 0);
+        });
     });
 });

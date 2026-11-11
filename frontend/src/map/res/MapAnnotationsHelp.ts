@@ -26,7 +26,9 @@ Without the annotation, it doesn't realize that that is the case.
 
 #### Low-clearance areas
 
-Purple areas mark low furniture. Dashed outlines are automatically detected and shown for reference; manually added areas can be moved, resized and deleted.
-Use **Save** to apply changes. The robot decides when to lower or raise its sensor.
+Low-clearance areas hint the firmware that there is low furniture it can fit under.
+Without the annotation, it might not try to.
+
+Areas detected by the robot itself are displayed with a dashed outline and can't be edited.
 
 `;

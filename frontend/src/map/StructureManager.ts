@@ -204,14 +204,25 @@ class StructureManager {
                     break;
                 }
                 case RawMapEntityType.LowClearance: {
+                    // Low-clearance areas can be polygons with an arbitrary point count
+                    const points: Array<{x: number, y: number}> = [];
+
                     if (e.points.length < 6 || e.points.length % 2 !== 0) {
                         break;
                     }
-                    const points = [];
+
                     for (let i = 0; i < e.points.length; i += 2) {
-                        points.push(this.convertCMCoordinatesToPixelSpace({x: e.points[i], y: e.points[i + 1]}));
+                        const p = this.convertCMCoordinatesToPixelSpace({
+                            x: e.points[i],
+                            y: e.points[i + 1]
+                        });
+                        points.push(p);
                     }
-                    mapStructures.push(new LowClearanceMapStructure(points, e.metaData.manual === true));
+
+                    mapStructures.push(new LowClearanceMapStructure(
+                        points,
+                        e.metaData.manual === true
+                    ));
                     break;
                 }
             }

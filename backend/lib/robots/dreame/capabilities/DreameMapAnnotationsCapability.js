@@ -1,5 +1,6 @@
 const DreameMapParser = require("../DreameMapParser");
 const MapAnnotationsCapability = require("../../../core/capabilities/MapAnnotationsCapability");
+const mapEntities = require("../../../entities/map");
 const RobotFirmwareError = require("../../../core/RobotFirmwareError");
 const ValetudoMapAnnotation = require("../../../entities/core/ValetudoMapAnnotation");
 const {sleep} = require("../../../utils/misc");
@@ -14,6 +15,7 @@ class DreameMapAnnotationsCapability extends MapAnnotationsCapability {
      * @param {import("../DreameValetudoRobot")} options.robot
      * @param {Array<import("../../../entities/core/ValetudoMapAnnotation").ValetudoMapAnnotationType>} options.supportedAnnotationTypes
      * @param {boolean} [options.lowClearanceSupported]
+     * @param {boolean} [options.incrementalUpdates] Only send annotations that actually changed. See setMapAnnotationsIncrementally()
      *
      * @param {object} options.miot_actions
      * @param {object} options.miot_actions.map_edit
@@ -32,11 +34,8 @@ class DreameMapAnnotationsCapability extends MapAnnotationsCapability {
 
         this.miot_actions = options.miot_actions;
         this.miot_properties = options.miot_properties;
-        this.lowClearanceSupported = options.lowClearanceSupported === true;
-    }
 
-    getProperties() {
-        return {...super.getProperties(), lowClearanceSupported: this.lowClearanceSupported};
+        this.incrementalUpdates = options.incrementalUpdates ?? false;
     }
 
     /**
@@ -134,142 +133,302 @@ class DreameMapAnnotationsCapability extends MapAnnotationsCapability {
             }
         }
 
-        const payloads = [];
-        let vwsWasApplied;
-        if (this.lowClearanceSupported && dreamePayload.vws) {
-            const existing = this.robot.state?.map?.metaData?.dreameVws;
-            if (!existing || !Array.isArray(existing.vwsl) || !Array.isArray(existing.npthrsd) ||
-                !Array.isArray(existing.ramp) || !Array.isArray(this.robot.state?.map?.entities) ||
-                existing.vwsl.some(line => !Array.isArray(line) || line.length < 4 || !line.slice(0, 4).every(Number.isFinite)) ||
-                existing.ramp.some(ramp => !Array.isArray(ramp) || ramp.length < 5 || !ramp.slice(0, 5).every(Number.isFinite))) {
-                throw new Error("Cannot save thresholds without the current impassable threshold data");
-            }
-            // V50 firmware may report success while ignoring VWS when sent with curtains.
-            // Keep the firmware's other VWS fields, including non-passable thresholds.
-            const pixelSize = this.robot.state.map.pixelSize ?? 1;
-            const snap = coordinate => Math.floor(coordinate / pixelSize) * pixelSize;
-            const normalize = (lines, withAngle = false) => lines.map(line => {
-                const a = DreameMapParser.CONVERT_TO_VALETUDO_COORDINATES(line[0], line[1]);
-                const b = DreameMapParser.CONVERT_TO_VALETUDO_COORDINATES(line[2], line[3]);
-                return JSON.stringify([snap(a.x), snap(a.y), snap(b.x), snap(b.y), ...(withAngle ? [line[4]] : [])]);
-            }).sort();
-            const differs = (a, b) => JSON.stringify(a) !== JSON.stringify(b);
-            const vwsChanged = differs(normalize(existing.vwsl), normalize(dreamePayload.vws.vwsl ?? [])) ||
-                differs(normalize(existing.ramp, true), normalize(dreamePayload.vws.ramp ?? [], true));
-            const currentCurtains = this.robot.state.map.entities.filter(e => e.type === "curtain")
-                .map(e => JSON.stringify(e.points.slice(0, 4).map(snap))).sort();
-            const curtainChanged = dreamePayload.curtain &&
-                differs(currentCurtains, normalize(dreamePayload.curtain.line));
-            if (vwsChanged) {
-                payloads.push({vws: {...existing, ...dreamePayload.vws}});
-            }
-            if (curtainChanged) {
-                payloads.push({curtain: dreamePayload.curtain});
-            }
-            if (vwsChanged && curtainChanged) {
-                const expectedLines = normalize(dreamePayload.vws.vwsl ?? []);
-                const expectedRamps = normalize(dreamePayload.vws.ramp ?? [], true);
-                vwsWasApplied = () => {
-                    const current = this.robot.state?.map?.metaData?.dreameVws;
-                    return current && Array.isArray(current.vwsl) && Array.isArray(current.ramp) &&
-                        !differs(normalize(current.vwsl), expectedLines) &&
-                        !differs(normalize(current.ramp, true), expectedRamps);
-                };
-            }
+        if (this.incrementalUpdates && dreamePayload.vws !== undefined) {
+            await this.setMapAnnotationsIncrementally(dreamePayload);
         } else {
-            payloads.push(dreamePayload);
+            await this.sendMapEdit(dreamePayload);
         }
 
-        for (const payload of payloads) {
-            const res = await this.robot.sendCommand("action", {
-                did: this.robot.deviceId,
-                siid: this.miot_actions.map_edit.siid,
-                aiid: this.miot_actions.map_edit.aiid,
-                in: [{piid: this.miot_properties.mapDetails.piid, value: JSON.stringify(payload)}]
+        this.robot.pollMap();
+    }
+
+    /**
+     * Some firmwares (e.g. the one of the Mova V50) report success but silently ignore vws changes if they
+     * are sent together with curtains. Furthermore, sending vws replaces all of it, including parts not
+     * managed by Valetudo such as impassable thresholds.
+     *
+     * Therefore, this only sends what actually changed, merges the vws changes into what is already on the robot
+     * and waits for the vws change to be applied before sending curtain changes
+     *
+     * @private
+     * @param {object} dreamePayload
+     * @returns {Promise<void>}
+     */
+    async setMapAnnotationsIncrementally(dreamePayload) {
+        const map = this.robot.state?.map;
+        const currentVws = map?.metaData?.dreameVws;
+
+        if (
+            !currentVws ||
+            !Array.isArray(currentVws.vwsl) ||
+            !Array.isArray(currentVws.npthrsd) ||
+            !Array.isArray(currentVws.ramp) ||
+            !Array.isArray(map.entities) ||
+            !currentVws.vwsl.every(line => {
+                return isValidVwsEntry(line, 4);
+            }) ||
+            !currentVws.ramp.every(ramp => {
+                return isValidVwsEntry(ramp, 5);
+            })
+        ) {
+            throw new Error("Cannot save thresholds without the current impassable threshold data");
+        }
+
+        /*
+            Annotations edited in the UI are snapped to the map pixel grid.
+            To not detect changes where there are none, everything is compared on that grid
+         */
+        const pixelSize = map.pixelSize ?? 1;
+        const snapToPixelGrid = (coordinate) => {
+            return Math.floor(coordinate / pixelSize) * pixelSize;
+        };
+        const serializeLines = (lines, withAngle = false) => {
+            return lines.map(line => {
+                const pA = DreameMapParser.CONVERT_TO_VALETUDO_COORDINATES(line[0], line[1]);
+                const pB = DreameMapParser.CONVERT_TO_VALETUDO_COORDINATES(line[2], line[3]);
+
+                return JSON.stringify([
+                    snapToPixelGrid(pA.x),
+                    snapToPixelGrid(pA.y),
+                    snapToPixelGrid(pB.x),
+                    snapToPixelGrid(pB.y),
+
+                    ...(withAngle ? [line[4]] : [])
+                ]);
+            }).sort();
+        };
+
+        const expectedLines = serializeLines(dreamePayload.vws.vwsl ?? []);
+        const expectedRamps = serializeLines(dreamePayload.vws.ramp ?? [], true);
+        const vwsMatchesExpectation = (vws) => {
+            return (
+                isEqual(serializeLines(vws.vwsl), expectedLines) &&
+                isEqual(serializeLines(vws.ramp, true), expectedRamps)
+            );
+        };
+
+        const vwsChanged = !vwsMatchesExpectation(currentVws);
+        let curtainChanged = false;
+
+        if (dreamePayload.curtain !== undefined) {
+            const currentCurtains = map.entities.filter(e => {
+                return e.type === mapEntities.LineMapEntity.TYPE.CURTAIN;
+            }).map(e => {
+                return JSON.stringify(e.points.slice(0, 4).map(snapToPixelGrid));
+            }).sort();
+
+            curtainChanged = !isEqual(currentCurtains, serializeLines(dreamePayload.curtain.line));
+        }
+
+        if (vwsChanged) {
+            await this.sendMapEdit({
+                vws: {
+                    ...currentVws,
+                    ...dreamePayload.vws
+                }
             });
-            if (!res || (res.code !== undefined && res.code !== 0) || res.siid !== this.miot_actions.map_edit.siid ||
-                res.aiid !== this.miot_actions.map_edit.aiid || !Array.isArray(res.out) ||
-                res.out.length !== 1 || res.out[0].piid !== this.miot_properties.actionResult.piid) {
-                throw new RobotFirmwareError("Unrecognized firmware response while saving map annotations");
-            }
-            if (res.out[0].value !== 0) {
-                throw new RobotFirmwareError("Got error " + res.out[0].value + " while saving map annotations");
-            }
-            if (payload.vws && vwsWasApplied) {
+
+            if (curtainChanged) {
+                const vwsWasApplied = () => {
+                    const vws = this.robot.state?.map?.metaData?.dreameVws;
+
+                    return (
+                        !!vws &&
+                        Array.isArray(vws.vwsl) &&
+                        Array.isArray(vws.ramp) &&
+                        vwsMatchesExpectation(vws)
+                    );
+                };
+
                 this.robot.pollMap();
-                for (let attempt = 0; attempt < 30 && !vwsWasApplied(); attempt++) {
+
+                for (let i = 0; i < 30 && !vwsWasApplied(); i++) {
                     await sleep(500);
                 }
+
                 if (!vwsWasApplied()) {
                     throw new RobotFirmwareError("Threshold update could not be verified; curtain changes were not sent. Refresh the map and retry.");
                 }
             }
         }
-        this.robot.pollMap();
+
+        if (curtainChanged) {
+            await this.sendMapEdit({
+                curtain: dreamePayload.curtain
+            });
+        }
     }
 
     /**
-     * Replace the complete set of manual low-clearance polygons.
+     *
      * @param {Array<Array<{x: number, y: number}>>} areas
      * @param {Array<Array<{x: number, y: number}>>} expectedAreas
      * @returns {Promise<void>}
      */
     async setLowClearanceAreas(areas, expectedAreas) {
         if (!this.lowClearanceSupported) {
-            throw new Error("Low-clearance editing is not enabled for this robot");
+            throw new Error("This robot does not support low-clearance areas");
         }
-        if (this.robot.state?.map?.metaData?.dreameLowClearanceEditable !== true) {
+
+        const map = this.robot.state?.map;
+
+        if (map?.metaData?.dreameLowClearanceEditable !== true) {
             throw new Error("Cannot safely edit low-clearance areas until the complete saved area list is available");
         }
-        const validAreas = list => Array.isArray(list) && !list.some(area =>
-            !Array.isArray(area) || area.length !== 4 || area.some(point =>
-                !point || !Number.isInteger(point.x) || !Number.isInteger(point.y) ||
-                point.x < 0 || point.x > 6553 || point.y < 0 || point.y > 6553
-            )
-        );
-        if (!validAreas(areas) || !validAreas(expectedAreas)) {
+
+        if (!isValidAreaList(areas) || !isValidAreaList(expectedAreas)) {
             throw new Error("Each area must have four integer map-coordinate points");
         }
-        if (!Array.isArray(this.robot.state.map.entities)) {
+
+        if (!Array.isArray(map.entities)) {
             throw new Error("Cannot safely edit low-clearance areas without map entities");
         }
-        const currentEntities = this.robot.state.map.entities.filter(e => e.type === "low_clearance" && e.metaData?.manual === true);
-        const current = currentEntities
-            .map(e => [0, 2, 4, 6].map(i => ({x: e.points[i], y: e.points[i + 1]})));
-        const normalize = list => list.map(a => JSON.stringify(a.map(p => [p.x, p.y]))).sort();
-        if (!validAreas(current) || JSON.stringify(normalize(current)) !== JSON.stringify(normalize(expectedAreas))) {
-            throw new Error("Low-clearance areas changed since editing began; refresh the map before saving");
-        }
-        const asa = areas.map(area => {
-            const matchingIndex = current.findIndex(existing => JSON.stringify(existing) === JSON.stringify(area));
-            const original = matchingIndex >= 0 ? currentEntities[matchingIndex].metaData?.dreameRoi : undefined;
-            if (Array.isArray(original) && original.length === 8 && original.every(Number.isInteger)) {
-                return original;
-            }
-            return area.flatMap(point => {
-                const p = DreameMapParser.CONVERT_TO_DREAME_COORDINATES(point.x, point.y);
-                if (p.x < -32768 || p.x > 32767 || p.y < -32768 || p.y > 32767) {
-                    throw new Error("Converted coordinate outside firmware range");
-                }
-                return [p.x, p.y];
+
+        const currentAreaEntities = map.entities.filter(e => {
+            return e.type === mapEntities.PolygonMapEntity.TYPE.LOW_CLEARANCE && e.metaData?.manual === true;
+        });
+        const currentAreas = currentAreaEntities.map(e => {
+            return [0, 2, 4, 6].map(i => {
+                return {
+                    x: e.points[i],
+                    y: e.points[i + 1]
+                };
             });
         });
-        const res = await this.robot.sendCommand("action", {
-            did: this.robot.deviceId,
-            siid: this.miot_actions.map_edit.siid,
-            aiid: this.miot_actions.map_edit.aiid,
-            in: [{piid: this.miot_properties.mapDetails.piid, value: JSON.stringify({asa: asa})}]
+
+        /*
+            Edits always replace the full list of manual areas on the robot.
+            If the list changed since the client started editing, we'd silently drop those changes
+         */
+        if (
+            !isValidAreaList(currentAreas) ||
+            !isEqual(serializeAreas(currentAreas), serializeAreas(expectedAreas))
+        ) {
+            throw new Error("Low-clearance areas changed since editing began; refresh the map before saving");
+        }
+
+        const dreameAreas = areas.map(area => {
+            const currentAreaIndex = currentAreas.findIndex(currentArea => {
+                return isEqual(currentArea, area);
+            });
+            const originalRoi = currentAreaIndex !== -1 ? currentAreaEntities[currentAreaIndex].metaData?.dreameRoi : undefined;
+
+            // Unchanged areas are sent back exactly as they were received to not shift them due to rounding
+            if (Array.isArray(originalRoi) && originalRoi.length === 8 && originalRoi.every(Number.isInteger)) {
+                return originalRoi;
+            }
+
+            return area.flatMap(point => {
+                const dreamePoint = DreameMapParser.CONVERT_TO_DREAME_COORDINATES(point.x, point.y);
+
+                if (
+                    dreamePoint.x < -DreameMapParser.HALF_INT16 || dreamePoint.x >= DreameMapParser.HALF_INT16 ||
+                    dreamePoint.y < -DreameMapParser.HALF_INT16 || dreamePoint.y >= DreameMapParser.HALF_INT16
+                ) {
+                    throw new Error("Converted coordinate outside firmware range");
+                }
+
+                return [dreamePoint.x, dreamePoint.y];
+            });
         });
-        if (!res || (res.code !== undefined && res.code !== 0) || res.siid !== this.miot_actions.map_edit.siid ||
-            res.aiid !== this.miot_actions.map_edit.aiid || !Array.isArray(res.out) ||
-            res.out.length !== 1 || res.out[0].piid !== this.miot_properties.actionResult.piid) {
-            throw new RobotFirmwareError("Unrecognized firmware response to low-clearance edit");
-        }
-        if (res.out[0].value !== 0) {
-            throw new RobotFirmwareError("Firmware rejected low-clearance edit: " + res.out[0].value);
-        }
+
+        await this.sendMapEdit({
+            asa: dreameAreas
+        });
+
         this.robot.pollMap();
     }
+
+    /**
+     * @private
+     * @param {object} payload
+     * @returns {Promise<void>}
+     */
+    async sendMapEdit(payload) {
+        const res = await this.robot.sendCommand("action",
+            {
+                did: this.robot.deviceId,
+                siid: this.miot_actions.map_edit.siid,
+                aiid: this.miot_actions.map_edit.aiid,
+                in: [
+                    {
+                        piid: this.miot_properties.mapDetails.piid,
+                        value: JSON.stringify(payload)
+                    }
+                ]
+            }
+        );
+
+        if (
+            res && (res.code === undefined || res.code === 0) &&
+            res.siid === this.miot_actions.map_edit.siid &&
+            res.aiid === this.miot_actions.map_edit.aiid &&
+            Array.isArray(res.out) && res.out.length === 1 &&
+            res.out[0].piid === this.miot_properties.actionResult.piid
+        ) {
+            switch (res.out[0].value) {
+                case 0:
+                    return;
+                default:
+                    throw new RobotFirmwareError("Got error " + res.out[0].value + " while saving map annotations.");
+            }
+        } else {
+            throw new RobotFirmwareError("Received unexpected response while saving map annotations.");
+        }
+    }
 }
+
+/**
+ * @param {any} entry
+ * @param {number} minLength
+ * @returns {boolean}
+ */
+function isValidVwsEntry(entry, minLength) {
+    return (
+        Array.isArray(entry) &&
+        entry.length >= minLength &&
+        entry.slice(0, minLength).every(Number.isFinite)
+    );
+}
+
+/**
+ * @param {any} areas
+ * @returns {boolean}
+ */
+function isValidAreaList(areas) {
+    return Array.isArray(areas) && areas.every(area => {
+        return (
+            Array.isArray(area) &&
+            area.length === 4 &&
+            area.every(point => {
+                return (
+                    !!point &&
+                    Number.isInteger(point.x) &&
+                    Number.isInteger(point.y) &&
+                    point.x >= 0 && point.x <= MAX_COORDINATE &&
+                    point.y >= 0 && point.y <= MAX_COORDINATE
+                );
+            })
+        );
+    });
+}
+
+/**
+ * @param {Array<Array<{x: number, y: number}>>} areas
+ * @returns {Array<string>}
+ */
+function serializeAreas(areas) {
+    return areas.map(area => {
+        return JSON.stringify(area.map(p => {
+            return [p.x, p.y];
+        }));
+    }).sort();
+}
+
+function isEqual(a, b) {
+    return JSON.stringify(a) === JSON.stringify(b);
+}
+
+const MAX_COORDINATE = 6553;
 
 module.exports = DreameMapAnnotationsCapability;

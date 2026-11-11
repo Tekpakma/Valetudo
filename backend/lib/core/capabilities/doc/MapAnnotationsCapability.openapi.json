@@ -1,0 +1,27 @@
+{
+  "components": {
+    "schemas": {
+      "MapAnnotationsCapabilityLowClearanceArea": {
+        "type": "array",
+        "minItems": 4,
+        "maxItems": 4,
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "x",
+            "y"
+          ],
+          "properties": {
+            "x": {
+              "type": "integer"
+            },
+            "y": {
+              "type": "integer"
+            }
+          }
+        }
+      }
+    }
+  }
+}

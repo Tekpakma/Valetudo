@@ -659,7 +659,12 @@ export interface ValetudoMapAnnotation {
 
 export interface MapAnnotationsProperties {
     supportedAnnotationTypes: Array<ValetudoMapAnnotationType>
-    lowClearanceSupported?: boolean
+    lowClearanceSupported: boolean
+}
+
+export interface LowClearanceAreasPayload {
+    areas: Array<Array<Point>>,
+    expectedAreas: Array<Array<Point>>
 }
 
 

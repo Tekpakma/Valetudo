@@ -1,5 +1,12 @@
 import BaseMap, {MapContainer, MapProps, MapState} from "./BaseMap";
-import {Capability, RawMapEntityType, RawMapLayerMaterial, StatusState} from "../api";
+import {
+    Capability,
+    RawMapEntityType,
+    RawMapLayerMaterial,
+    StatusState,
+    ValetudoMapAnnotation,
+    ValetudoMapAnnotationType
+} from "../api";
 import {ActionsContainer} from "./Styled";
 import SegmentLabelMapStructure from "./structures/map_structures/SegmentLabelMapStructure";
 import SegmentActions from "./actions/edit_map_actions/SegmentActions";
@@ -56,10 +63,12 @@ interface EditMapState extends MapState {
 }
 
 class EditMap extends BaseMap<EditMapProps, EditMapState> {
-    private lowClearanceExpectedAreas: Array<Array<PointCoordinates>> = [];
-    private originalAnnotations: Array<string> = [];
     protected pendingVirtualRestrictionsStructuresUpdate = false;
     protected pendingMapAnnotationsStructuresUpdate = false;
+
+    // Used to only save what actually changed
+    protected savedMapAnnotations: Array<ValetudoMapAnnotation> = [];
+    protected savedLowClearanceAreas: Array<Array<PointCoordinates>> = [];
 
     constructor(props: EditMapProps) {
         super(props);
@@ -137,8 +146,14 @@ class EditMap extends BaseMap<EditMapProps, EditMapState> {
                     case RawMapEntityType.Carpet:
                         return true;
                     case RawMapEntityType.LowClearance:
-                        return mode === "annotations" &&
-                            (e.metaData.manual !== true || this.props.rawMap.metaData.dreameLowClearanceEditable !== true);
+                        // Editable low-clearance areas are rendered as client structures instead
+                        return (
+                            mode === "annotations" &&
+                            (
+                                e.metaData.manual !== true ||
+                                this.props.rawMap.metaData.dreameLowClearanceEditable !== true
+                            )
+                        );
                     default:
                         return false;
                 }
@@ -213,7 +228,12 @@ class EditMap extends BaseMap<EditMapProps, EditMapState> {
                     return true;
                 }
             }) as Array<RampClientStructure>,
-            lowClearanceAreas: this.structureManager.getClientStructures().filter(s => s.type === LowClearanceClientStructure.TYPE) as Array<LowClearanceClientStructure>,
+
+            lowClearanceAreas: this.structureManager.getClientStructures().filter(s => {
+                if (s.type === LowClearanceClientStructure.TYPE) {
+                    return true;
+                }
+            }) as Array<LowClearanceClientStructure>,
         });
     }
 
@@ -298,33 +318,11 @@ class EditMap extends BaseMap<EditMapProps, EditMapState> {
                 }
             });
         } else {
-            this.lowClearanceExpectedAreas = this.props.rawMap.entities
-                .filter(e => e.type === RawMapEntityType.LowClearance && e.metaData.manual === true && e.points.length === 8)
-                .map(e => [0, 2, 4, 6].map(i => ({x: e.points[i], y: e.points[i + 1]})));
-            const pixelSize = this.props.rawMap.pixelSize;
-            this.originalAnnotations = this.props.rawMap.entities
-                .filter(e => [RawMapEntityType.Threshold, RawMapEntityType.Curtain, RawMapEntityType.Ramp].includes(e.type))
-                .map(e => JSON.stringify([e.type, Array.from({length: e.points.length / 2}, (_, i) => [
-                    Math.floor(e.points[i * 2] / pixelSize) * pixelSize,
-                    Math.floor(e.points[i * 2 + 1] / pixelSize) * pixelSize
-                ])])).sort();
+            this.savedMapAnnotations = [];
+            this.savedLowClearanceAreas = [];
+
             this.props.rawMap.entities.forEach(e => {
                 switch (e.type) {
-                    case RawMapEntityType.LowClearance: {
-                        if (e.metaData.manual !== true || e.points.length !== 8 ||
-                            this.props.rawMap.metaData.dreameLowClearanceEditable !== true) {
-                            break;
-                        }
-                        // Keep sub-pixel coordinates so saving a different area does not shift this one.
-                        const p = [0, 2, 4, 6].map(i => ({
-                            x: e.points[i] / this.props.rawMap.pixelSize,
-                            y: e.points[i + 1] / this.props.rawMap.pixelSize
-                        }));
-                        this.structureManager.addClientStructure(new LowClearanceClientStructure(
-                            p[0].x, p[0].y, p[1].x, p[1].y, p[2].x, p[2].y, p[3].x, p[3].y, false
-                        ));
-                        break;
-                    }
                     case RawMapEntityType.Threshold: {
                         const p0 = this.structureManager.convertCMCoordinatesToPixelSpace({x: e.points[0], y: e.points[1]});
                         const p1 = this.structureManager.convertCMCoordinatesToPixelSpace({x: e.points[2], y: e.points[3]});
@@ -334,6 +332,13 @@ class EditMap extends BaseMap<EditMapProps, EditMapState> {
                             p1.x, p1.y,
                             false
                         ));
+
+                        this.savedMapAnnotations.push({
+                            type: ValetudoMapAnnotationType.Threshold,
+                            points: [p0, p1].map(p => {
+                                return this.structureManager.convertPixelCoordinatesToCMSpace(p);
+                            })
+                        });
                         break;
                     }
                     case RawMapEntityType.Curtain: {
@@ -345,6 +350,13 @@ class EditMap extends BaseMap<EditMapProps, EditMapState> {
                             p1.x, p1.y,
                             false
                         ));
+
+                        this.savedMapAnnotations.push({
+                            type: ValetudoMapAnnotationType.Curtain,
+                            points: [p0, p1].map(p => {
+                                return this.structureManager.convertPixelCoordinatesToCMSpace(p);
+                            })
+                        });
                         break;
                     }
                     case RawMapEntityType.Ramp: {
@@ -354,6 +366,45 @@ class EditMap extends BaseMap<EditMapProps, EditMapState> {
                         const p3 = this.structureManager.convertCMCoordinatesToPixelSpace({x: e.points[6], y: e.points[7]});
 
                         this.structureManager.addClientStructure(new RampClientStructure(
+                            p0.x, p0.y,
+                            p1.x, p1.y,
+                            p2.x, p2.y,
+                            p3.x, p3.y,
+                            false
+                        ));
+
+                        this.savedMapAnnotations.push({
+                            type: ValetudoMapAnnotationType.Ramp,
+                            points: [p0, p1, p2, p3].map(p => {
+                                return this.structureManager.convertPixelCoordinatesToCMSpace(p);
+                            })
+                        });
+                        break;
+                    }
+                    case RawMapEntityType.LowClearance: {
+                        if (e.metaData.manual !== true || e.points.length !== 8) {
+                            break;
+                        }
+
+                        this.savedLowClearanceAreas.push([
+                            {x: e.points[0], y: e.points[1]},
+                            {x: e.points[2], y: e.points[3]},
+                            {x: e.points[4], y: e.points[5]},
+                            {x: e.points[6], y: e.points[7]}
+                        ]);
+
+                        if (this.props.rawMap.metaData.dreameLowClearanceEditable !== true) {
+                            break;
+                        }
+
+                        // Not snapped to the pixel grid so that saving other areas does not shift this one
+                        const pixelSize = this.props.rawMap.pixelSize;
+                        const p0 = {x: e.points[0] / pixelSize, y: e.points[1] / pixelSize};
+                        const p1 = {x: e.points[2] / pixelSize, y: e.points[3] / pixelSize};
+                        const p2 = {x: e.points[4] / pixelSize, y: e.points[5] / pixelSize};
+                        const p3 = {x: e.points[6] / pixelSize, y: e.points[7] / pixelSize};
+
+                        this.structureManager.addClientStructure(new LowClearanceClientStructure(
                             p0.x, p0.y,
                             p1.x, p1.y,
                             p2.x, p2.y,
@@ -655,16 +706,19 @@ class EditMap extends BaseMap<EditMapProps, EditMapState> {
                             curtains={this.state.curtains}
                             ramps={this.state.ramps}
                             lowClearanceAreas={this.state.lowClearanceAreas}
-                            lowClearanceExpectedAreas={this.lowClearanceExpectedAreas}
-                            originalAnnotations={this.originalAnnotations}
                             lowClearanceEditable={this.props.rawMap.metaData.dreameLowClearanceEditable === true}
-                            convertLowClearanceCoordinates={(coordinates => ({
-                                x: Math.round(coordinates.x * this.props.rawMap.pixelSize),
-                                y: Math.round(coordinates.y * this.props.rawMap.pixelSize)
-                            }))}
+
+                            savedMapAnnotations={this.savedMapAnnotations}
+                            savedLowClearanceAreas={this.savedLowClearanceAreas}
 
                             convertPixelCoordinatesToCMSpace={(coordinates => {
                                 return this.structureManager.convertPixelCoordinatesToCMSpace(coordinates);
+                            })}
+                            convertLowClearanceCoordinatesToCMSpace={(coordinates => {
+                                return {
+                                    x: Math.round(coordinates.x * this.props.rawMap.pixelSize),
+                                    y: Math.round(coordinates.y * this.props.rawMap.pixelSize)
+                                };
                             })}
 
                             onAddThreshold={() => {
@@ -746,13 +800,36 @@ class EditMap extends BaseMap<EditMapProps, EditMapState> {
                                 this.draw();
                             }}
 
-                            onAddLowClearance={() => {
-                                const c = this.getCurrentViewportCenterCoordinatesInPixelSpace();
+                            onAddLowClearanceArea={() => {
+                                const currentCenter = this.getCurrentViewportCenterCoordinatesInPixelSpace();
+
+                                const p0 = {
+                                    x: currentCenter.x -10,
+                                    y: currentCenter.y -10
+                                };
+                                const p1 = {
+                                    x: currentCenter.x +10,
+                                    y: currentCenter.y -10
+                                };
+                                const p2 = {
+                                    x: currentCenter.x +10,
+                                    y: currentCenter.y +10
+                                };
+                                const p3 = {
+                                    x: currentCenter.x -10,
+                                    y: currentCenter.y +10
+                                };
+
                                 this.structureManager.addClientStructure(new LowClearanceClientStructure(
-                                    c.x - 10, c.y - 10, c.x + 10, c.y - 10,
-                                    c.x + 10, c.y + 10, c.x - 10, c.y + 10, true
+                                    p0.x, p0.y,
+                                    p1.x, p1.y,
+                                    p2.x, p2.y,
+                                    p3.x, p3.y,
+                                    true
                                 ));
+
                                 this.updateState();
+
                                 this.draw();
                             }}
 

@@ -1,9 +1,9 @@
 import {
     Capability,
     StatusState,
+    useLowClearanceAreasMutation,
     useMapAnnotationsMutation,
     useMapAnnotationsPropertiesQuery,
-    useLowClearanceMutation,
     ValetudoMapAnnotation,
     ValetudoMapAnnotationType,
 } from "../../../api";
@@ -25,22 +25,44 @@ interface MapAnnotationActionsProperties {
     curtains: Array<CurtainClientStructure>,
     ramps: Array<RampClientStructure>,
     lowClearanceAreas: Array<LowClearanceClientStructure>,
-    lowClearanceExpectedAreas: Array<Array<PointCoordinates>>,
-    originalAnnotations: Array<string>,
     lowClearanceEditable: boolean,
 
+    savedMapAnnotations: Array<ValetudoMapAnnotation>,
+    savedLowClearanceAreas: Array<Array<PointCoordinates>>,
+
     convertPixelCoordinatesToCMSpace(coordinates: PointCoordinates) : PointCoordinates
-    convertLowClearanceCoordinates(coordinates: PointCoordinates) : PointCoordinates
+    convertLowClearanceCoordinatesToCMSpace(coordinates: PointCoordinates) : PointCoordinates
 
     onAddThreshold(): void,
     onAddCurtain(): void,
     onAddRamp(): void,
-    onAddLowClearance(): void,
+    onAddLowClearanceArea(): void,
 
     onSave(): void;
     onRefresh(): void;
     onClear(): void;
 }
+
+const serializeMapAnnotations = (mapAnnotations: Array<ValetudoMapAnnotation>): string => {
+    return JSON.stringify(
+        mapAnnotations.map(annotation => {
+            return JSON.stringify([
+                annotation.type,
+                annotation.points.map(p => {
+                    return [p.x, p.y];
+                })
+            ]);
+        }).sort()
+    );
+};
+
+const serializeLowClearanceAreas = (areas: Array<Array<PointCoordinates>>): string => {
+    return JSON.stringify(
+        areas.map(area => {
+            return JSON.stringify(area);
+        }).sort()
+    );
+};
 
 const MapAnnotationActions = (
     props: MapAnnotationActionsProperties
@@ -50,14 +72,19 @@ const MapAnnotationActions = (
         curtains,
         ramps,
         lowClearanceAreas,
+        lowClearanceEditable,
+
+        savedMapAnnotations,
+        savedLowClearanceAreas,
 
         convertPixelCoordinatesToCMSpace,
+        convertLowClearanceCoordinatesToCMSpace,
 
 
         onAddThreshold,
         onAddCurtain,
         onAddRamp,
-        onAddLowClearance,
+        onAddLowClearanceArea,
 
         onSave,
         onRefresh,
@@ -76,9 +103,12 @@ const MapAnnotationActions = (
         mutateAsync: saveAnnotations,
         isPending: annotationsSaving
     } = useMapAnnotationsMutation();
+    const {
+        mutateAsync: saveLowClearanceAreas,
+        isPending: lowClearanceAreasSaving
+    } = useLowClearanceAreasMutation();
+    const saving = annotationsSaving || lowClearanceAreasSaving;
     const canEdit = props.robotStatus.value === "docked";
-    const {mutateAsync: saveLowClearance, isPending: lowClearanceSaving} = useLowClearanceMutation();
-    const saving = annotationsSaving || lowClearanceSaving;
 
     const handleSaveClick = React.useCallback(async () => {
         if (!canEdit) {
@@ -142,32 +172,68 @@ const MapAnnotationActions = (
             });
         });
 
-        const areas = lowClearanceAreas.map(area => [
-            {x: area.x0, y: area.y0}, {x: area.x1, y: area.y1},
-            {x: area.x2, y: area.y2}, {x: area.x3, y: area.y3}
-        ].map(props.convertLowClearanceCoordinates));
-        const normalize = (list: Array<Array<PointCoordinates>>) => list.map(a => JSON.stringify(a)).sort();
-        const lowClearanceChanged = props.lowClearanceEditable &&
-            JSON.stringify(normalize(areas)) !== JSON.stringify(normalize(props.lowClearanceExpectedAreas));
-        const currentAnnotations = mapAnnotations.map(annotation => JSON.stringify([
-            annotation.type, annotation.points.map(point => [point.x, point.y])
-        ])).sort();
-        const annotationsChanged = JSON.stringify(currentAnnotations) !== JSON.stringify(props.originalAnnotations);
+        const areas = lowClearanceAreas.map((a) => {
+            return [
+                convertLowClearanceCoordinatesToCMSpace({
+                    x: a.x0,
+                    y: a.y0
+                }),
+                convertLowClearanceCoordinatesToCMSpace({
+                    x: a.x1,
+                    y: a.y1
+                }),
+                convertLowClearanceCoordinatesToCMSpace({
+                    x: a.x2,
+                    y: a.y2
+                }),
+                convertLowClearanceCoordinatesToCMSpace({
+                    x: a.x3,
+                    y: a.y3
+                })
+            ];
+        });
+
+        /*
+            Map annotations and low-clearance areas are saved separately.
+            To not unnecessarily touch anything on the robot, we only save what actually changed
+         */
+        const mapAnnotationsChanged = serializeMapAnnotations(mapAnnotations) !== serializeMapAnnotations(savedMapAnnotations);
+        const lowClearanceAreasChanged = (
+            lowClearanceEditable &&
+            serializeLowClearanceAreas(areas) !== serializeLowClearanceAreas(savedLowClearanceAreas)
+        );
 
         try {
-            if (annotationsChanged) {
+            if (mapAnnotationsChanged) {
                 await saveAnnotations(mapAnnotations);
             }
-            if (lowClearanceChanged) {
-                await saveLowClearance({areas: areas, expectedAreas: props.lowClearanceExpectedAreas});
+
+            if (lowClearanceAreasChanged) {
+                await saveLowClearanceAreas({
+                    areas: areas,
+                    expectedAreas: savedLowClearanceAreas
+                });
             }
+
             onSave();
         } catch {
-            // The mutation hooks report command errors; do not discard unsaved edits.
+            // Errors are already displayed by the mutation hooks. Unsaved changes are kept so that they can be retried
         }
-    }, [canEdit, saveAnnotations, saveLowClearance, thresholds, curtains, ramps, lowClearanceAreas,
-        convertPixelCoordinatesToCMSpace, props.convertLowClearanceCoordinates, props.lowClearanceEditable,
-        props.lowClearanceExpectedAreas, props.originalAnnotations, onSave]);
+    }, [
+        canEdit,
+        saveAnnotations,
+        saveLowClearanceAreas,
+        thresholds,
+        curtains,
+        ramps,
+        lowClearanceAreas,
+        lowClearanceEditable,
+        savedMapAnnotations,
+        savedLowClearanceAreas,
+        convertPixelCoordinatesToCMSpace,
+        convertLowClearanceCoordinatesToCMSpace,
+        onSave
+    ]);
 
     if (mapAnnotationsPropertiesLoadError) {
         return (
@@ -285,11 +351,16 @@ const MapAnnotationActions = (
                                 </ActionButton>
                             }
                             {
-                                mapAnnotationsProperties.lowClearanceSupported && props.lowClearanceEditable &&
-                                <ActionButton color="inherit" size="medium" variant="extended" onClick={() => {
-                                    onAddLowClearance();
-                                    close();
-                                }}>
+                                mapAnnotationsProperties.lowClearanceSupported && lowClearanceEditable &&
+                                <ActionButton
+                                    color="inherit"
+                                    size="medium"
+                                    variant="extended"
+                                    onClick={() => {
+                                        onAddLowClearanceArea();
+                                        close();
+                                    }}
+                                >
                                     <AddLowClearanceIcon style={{marginRight: "0.25rem", marginLeft: "-0.25rem"}}/>
                                     Low-clearance area ({lowClearanceAreas.length})
                                 </ActionButton>
@@ -298,15 +369,29 @@ const MapAnnotationActions = (
                     )}
                 </MapActionsCombinedActionsMenuPopoverButton>
             }
-            {canEdit && mapAnnotationsProperties.lowClearanceSupported && !props.lowClearanceEditable &&
-                <Grid2><Typography variant="caption">Waiting for complete low-clearance map data</Typography></Grid2>}
+            {
+                canEdit && mapAnnotationsProperties.lowClearanceSupported && !lowClearanceEditable &&
+                <Grid2>
+                    <Typography variant="caption" color="textSecondary">
+                        Waiting for complete low-clearance map data
+                    </Typography>
+                </Grid2>
+            }
             {
                 canEdit &&
                 <Grid2>
                     <ActionButton
                         color="inherit"
                         size="medium"
-                        disabled={saving || (thresholds.length === 0 && curtains.length === 0 && ramps.length === 0 && lowClearanceAreas.length === 0)}
+                        disabled={
+                            saving ||
+                            (
+                                thresholds.length === 0 &&
+                                curtains.length === 0 &&
+                                ramps.length === 0 &&
+                                lowClearanceAreas.length === 0
+                            )
+                        }
                         variant="extended"
                         onClick={onClear}
                     >

@@ -1,35 +1,54 @@
 import MapStructure from "./MapStructure";
 import {Canvas2DContextTrackingWrapper} from "../../utils/Canvas2DContextTrackingWrapper";
 import {considerHiDPI} from "../../utils/helpers";
-import {PointCoordinates} from "../../utils/types";
 
 class LowClearanceMapStructure extends MapStructure {
     public static readonly TYPE = "LowClearanceMapStructure";
-    private points: Array<PointCoordinates>;
-    private manual: boolean;
 
-    constructor(points: Array<PointCoordinates>, manual: boolean) {
-        super(points[0].x, points[0].y);
+    private readonly points: Array<{x: number, y: number}>;
+    private readonly manual: boolean;
+
+
+    constructor(
+        points: Array<{x: number, y: number}>,
+        manual: boolean
+    ) {
+        super(points[0].x, points[0].y); // Doesn't really make sense here, but whatever
         this.points = points;
         this.manual = manual;
     }
 
-    draw(ctxWrapper: Canvas2DContextTrackingWrapper, transformationMatrixToScreenSpace: DOMMatrixInit): void {
+    draw(ctxWrapper: Canvas2DContextTrackingWrapper, transformationMatrixToScreenSpace: DOMMatrixInit, scaleFactor: number): void {
         const ctx = ctxWrapper.getContext();
-        const points = this.points.map(point => new DOMPoint(point.x, point.y).matrixTransform(transformationMatrixToScreenSpace));
+
+        const screenPoints = this.points.map(p =>
+            new DOMPoint(p.x, p.y).matrixTransform(transformationMatrixToScreenSpace)
+        );
+
         ctxWrapper.save();
+
         ctx.lineCap = "round";
         ctx.lineJoin = "round";
+
         ctx.beginPath();
-        ctx.moveTo(points[0].x, points[0].y);
-        points.slice(1).forEach(point => ctx.lineTo(point.x, point.y));
+        ctx.moveTo(screenPoints[0].x, screenPoints[0].y);
+        for (let i = 1; i < screenPoints.length; i++) {
+            ctx.lineTo(screenPoints[i].x, screenPoints[i].y);
+        }
         ctx.closePath();
+
         ctx.fillStyle = "rgba(168, 85, 247, 0.12)";
         ctx.fill();
+
         ctx.lineWidth = considerHiDPI(2);
         ctx.strokeStyle = "rgba(168, 85, 247, 0.9)";
-        ctx.setLineDash(this.manual ? [] : [considerHiDPI(4), considerHiDPI(3)]);
+
+        if (!this.manual) {
+            ctx.setLineDash([considerHiDPI(4), considerHiDPI(3)]);
+        }
+
         ctx.stroke();
+
         ctxWrapper.restore();
     }
 }
