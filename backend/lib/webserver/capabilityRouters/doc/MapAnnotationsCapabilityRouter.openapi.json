@@ -6,8 +6,12 @@
       "requestBody": {
         "required": true,
         "content": {"application/json": {"schema": {
-          "type": "object", "required": ["areas"], "additionalProperties": false,
+          "type": "object", "required": ["areas", "expectedAreas"], "additionalProperties": false,
           "properties": {"areas": {"type": "array", "items": {
+            "type": "array", "minItems": 4, "maxItems": 4,
+            "items": {"type": "object", "required": ["x", "y"], "additionalProperties": false,
+              "properties": {"x": {"type": "integer"}, "y": {"type": "integer"}}}
+          }}, "expectedAreas": {"type": "array", "items": {
             "type": "array", "minItems": 4, "maxItems": 4,
             "items": {"type": "object", "required": ["x", "y"], "additionalProperties": false,
               "properties": {"x": {"type": "integer"}, "y": {"type": "integer"}}}
@@ -57,7 +61,11 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "type": "object",
+                "properties": {
+                  "lowClearanceSupported": {"type": "boolean"},
+                  "supportedAnnotationTypes": {"type": "array", "items": {"type": "string"}}
+                }
               }
             }
           }

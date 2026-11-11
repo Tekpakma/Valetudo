@@ -1326,6 +1326,10 @@ export const sendMapAnnotationsUpdate = async (
     );
 };
 
+export const sendLowClearanceUpdate = async (payload: {areas: Array<Array<Point>>, expectedAreas: Array<Array<Point>>}): Promise<void> => {
+    await valetudoAPI.put(`/robot/capabilities/${Capability.MapAnnotations}/low_clearance`, payload);
+};
+
 export const fetchFloorMaterialDirectionAwareNavigationControlState = async (): Promise<SimpleToggleState> => {
     return valetudoAPI
         .get<SimpleToggleState>(`/robot/capabilities/${Capability.FloorMaterialDirectionAwareNavigationControl}`)

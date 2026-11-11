@@ -25,6 +25,7 @@ PolygonMapEntity.TYPE = Object.freeze({
     CARPET: "carpet",
 
     RAMP: "ramp",
+    LOW_CLEARANCE: "low_clearance",
 });
 
 module.exports = PolygonMapEntity;

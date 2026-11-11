@@ -17,7 +17,8 @@
                   "no_mop_area",
                   "carpet",
 
-                  "ramp"
+                  "ramp",
+                  "low_clearance"
                 ]
               }
             }

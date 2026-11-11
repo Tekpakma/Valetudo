@@ -16,6 +16,7 @@ import CarpetMapStructure from "./structures/map_structures/CarpetMapStructure";
 import ThresholdMapStructure from "./structures/map_structures/ThresholdMapStructure";
 import CurtainMapStructure from "./structures/map_structures/CurtainMapStructure";
 import RampMapStructure from "./structures/map_structures/RampMapStructure";
+import LowClearanceMapStructure from "./structures/map_structures/LowClearanceMapStructure";
 
 const MAP_STRUCTURES = [
     ActiveZoneMapStructure,
@@ -26,6 +27,7 @@ const MAP_STRUCTURES = [
     NoMopAreaMapStructure,
     ObstacleMapStructure,
     RampMapStructure,
+    LowClearanceMapStructure,
     RobotPositionMapStructure,
     SegmentLabelMapStructure,
     VirtualWallMapStructure,
@@ -201,6 +203,17 @@ class StructureManager {
                     ));
                     break;
                 }
+                case RawMapEntityType.LowClearance: {
+                    if (e.points.length < 6 || e.points.length % 2 !== 0) {
+                        break;
+                    }
+                    const points = [];
+                    for (let i = 0; i < e.points.length; i += 2) {
+                        points.push(this.convertCMCoordinatesToPixelSpace({x: e.points[i], y: e.points[i + 1]}));
+                    }
+                    mapStructures.push(new LowClearanceMapStructure(points, e.metaData.manual === true));
+                    break;
+                }
             }
         });
 
@@ -327,6 +340,7 @@ const TYPE_SORT_MAPPING: Record<MapStructureType, number> = {
     [ThresholdMapStructure.TYPE]: 6,
     [CurtainMapStructure.TYPE]: 6,
     [RampMapStructure.TYPE]: 6,
+    [LowClearanceMapStructure.TYPE]: 6,
 
     [ObstacleMapStructure.TYPE]: 7,
 

@@ -659,6 +659,7 @@ export interface ValetudoMapAnnotation {
 
 export interface MapAnnotationsProperties {
     supportedAnnotationTypes: Array<ValetudoMapAnnotationType>
+    lowClearanceSupported?: boolean
 }
 
 

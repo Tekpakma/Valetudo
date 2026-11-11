@@ -19,6 +19,7 @@ export interface RawMapEntityMetaData {
     angle?: number;
     label?: string;
     id?: string;
+    manual?: boolean;
 }
 
 export interface RawMapLayer {
@@ -80,9 +81,11 @@ export enum RawMapEntityType {
     Threshold = "threshold",
     Curtain = "curtain",
     Ramp = "ramp",
+    LowClearance = "low_clearance",
 }
 
 export interface RawMapDataMetaData {
     version: number;
     nonce: string;
+    dreameLowClearanceEditable?: boolean;
 }

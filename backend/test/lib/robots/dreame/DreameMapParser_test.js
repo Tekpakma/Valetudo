@@ -151,6 +151,7 @@ describe("DreameMapParser", () => {
         const data = await fs.readFile(path.join(__dirname, "/res/map/l10su_3031_giant.bin"));
         const expected = JSON.parse(await fs.readFile(path.join(__dirname, "/res/map/l10su_3031_giant.json"), { encoding: "utf-8" }));
         const actual = await DreameMapParser.PARSE(await DreameMapParser.PREPROCESS(data));
+        expected.metaData.dreameVws = {vwsl: []};
 
         assertParsedMap(actual, expected);
     });

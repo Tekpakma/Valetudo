@@ -3,6 +3,7 @@ import {
     StatusState,
     useMapAnnotationsMutation,
     useMapAnnotationsPropertiesQuery,
+    useLowClearanceMutation,
     ValetudoMapAnnotation,
     ValetudoMapAnnotationType,
 } from "../../../api";
@@ -16,18 +17,24 @@ import MapActionsCombinedActionsMenuPopoverButton from "../../MapActionsCombined
 import ThresholdClientStructure from "../../structures/client_structures/ThresholdClientStructure";
 import CurtainClientStructure from "../../structures/client_structures/CurtainClientStructure";
 import RampClientStructure from "../../structures/client_structures/RampClientStructure";
+import LowClearanceClientStructure from "../../structures/client_structures/LowClearanceClientStructure";
 
 interface MapAnnotationActionsProperties {
     robotStatus: StatusState,
     thresholds: Array<ThresholdClientStructure>,
     curtains: Array<CurtainClientStructure>,
     ramps: Array<RampClientStructure>,
+    lowClearanceAreas: Array<LowClearanceClientStructure>,
+    lowClearanceExpectedAreas: Array<Array<PointCoordinates>>,
+    lowClearanceEditable: boolean,
 
     convertPixelCoordinatesToCMSpace(coordinates: PointCoordinates) : PointCoordinates
+    convertLowClearanceCoordinates(coordinates: PointCoordinates) : PointCoordinates
 
     onAddThreshold(): void,
     onAddCurtain(): void,
     onAddRamp(): void,
+    onAddLowClearance(): void,
 
     onSave(): void;
     onRefresh(): void;
@@ -41,6 +48,7 @@ const MapAnnotationActions = (
         thresholds,
         curtains,
         ramps,
+        lowClearanceAreas,
 
         convertPixelCoordinatesToCMSpace,
 
@@ -48,6 +56,7 @@ const MapAnnotationActions = (
         onAddThreshold,
         onAddCurtain,
         onAddRamp,
+        onAddLowClearance,
 
         onSave,
         onRefresh,
@@ -69,6 +78,20 @@ const MapAnnotationActions = (
         onSuccess: onSave,
     });
     const canEdit = props.robotStatus.value === "docked";
+    const {mutate: saveLowClearance, isPending: lowClearanceSaving} = useLowClearanceMutation({onSuccess: onSave});
+
+    const handleSaveLowClearance = React.useCallback(() => {
+        if (!canEdit || !props.lowClearanceEditable) {
+            return;
+        }
+        saveLowClearance({
+            areas: lowClearanceAreas.map(area => [
+                {x: area.x0, y: area.y0}, {x: area.x1, y: area.y1},
+                {x: area.x2, y: area.y2}, {x: area.x3, y: area.y3}
+            ].map(props.convertLowClearanceCoordinates)),
+            expectedAreas: props.lowClearanceExpectedAreas
+        });
+    }, [canEdit, props.lowClearanceEditable, props.lowClearanceExpectedAreas, props.convertLowClearanceCoordinates, saveLowClearance, lowClearanceAreas]);
 
     const handleSaveClick = React.useCallback(() => {
         if (!canEdit) {
@@ -250,9 +273,29 @@ const MapAnnotationActions = (
                                     Ramp ({ramps.length})
                                 </ActionButton>
                             }
+                            {
+                                mapAnnotationsProperties.lowClearanceSupported && props.lowClearanceEditable &&
+                                <ActionButton color="inherit" size="medium" variant="extended" onClick={() => {
+                                    onAddLowClearance();
+                                    close();
+                                }}>
+                                    Low-clearance area ({lowClearanceAreas.length})
+                                </ActionButton>
+                            }
                         </>
                     )}
                 </MapActionsCombinedActionsMenuPopoverButton>
+            }
+            {
+                canEdit && mapAnnotationsProperties.lowClearanceSupported &&
+                <Grid2>
+                    <ActionButton color="inherit" size="medium" variant="extended"
+                        disabled={!props.lowClearanceEditable || lowClearanceSaving}
+                        onClick={handleSaveLowClearance}>
+                        Save low-clearance areas
+                    </ActionButton>
+                    {!props.lowClearanceEditable && <Typography variant="caption">Waiting for complete low-clearance map data</Typography>}
+                </Grid2>
             }
             {
                 canEdit &&

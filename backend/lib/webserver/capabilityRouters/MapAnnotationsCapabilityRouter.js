@@ -8,7 +8,7 @@ class MapAnnotationsCapabilityRouter extends CapabilityRouter {
                 if (typeof this.capability.setLowClearanceAreas !== "function") {
                     return res.sendStatus(404);
                 }
-                await this.capability.setLowClearanceAreas(req.body.areas);
+                await this.capability.setLowClearanceAreas(req.body.areas, req.body.expectedAreas);
                 res.sendStatus(200);
             } catch (e) {
                 this.sendErrorResponse(req, res, e);

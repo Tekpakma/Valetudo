@@ -24,4 +24,11 @@ Without the annotation, it might not realize that it exists.
 Curtains hint the firmware that the obstacle it is looking at actually isn't one and that it can just drive into it.
 Without the annotation, it doesn't realize that that is the case.
 
+#### Low-clearance areas
+
+Purple areas mark low furniture. Dashed outlines are automatically detected and shown for reference; manually added areas can be moved, resized and deleted.
+Use **Save low-clearance areas** to save the complete set of manual areas separately from other annotations. The robot decides when to lower or raise its sensor.
+
+On supported robots, save changes to curtains separately from changes to thresholds or ramps.
+
 `;

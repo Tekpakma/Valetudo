@@ -151,6 +151,13 @@ class DreameMapParser {
                 const rismResult = await DreameMapParser.PARSE(await DreameMapParser.PREPROCESS(additionalData.rism), MAP_DATA_TYPES.RISM);
 
                 if (rismResult instanceof mapEntities.ValetudoMap) {
+                    if (rismResult.metaData?.dreameVws !== undefined) {
+                        metaData.dreameVws = rismResult.metaData.dreameVws;
+                    }
+                    if (rismResult.metaData?.dreameLowClearanceEditable !== undefined) {
+                        metaData.dreameLowClearanceEditable = rismResult.metaData.dreameLowClearanceEditable;
+                        metaData.dreameLowClearance = rismResult.metaData.dreameLowClearance;
+                    }
                     rismResult.entities.forEach(e => {
                         if (e instanceof mapEntities.PointMapEntity) {
                             if (e.type === mapEntities.PointMapEntity.TYPE.ROBOT_POSITION && parsedHeader.robot_position.valid === false) {
@@ -164,7 +171,9 @@ class DreameMapParser {
                                 e.type === mapEntities.PolygonMapEntity.TYPE.NO_GO_AREA ||
                                 e.type === mapEntities.PolygonMapEntity.TYPE.NO_MOP_AREA ||
                                 e.type === mapEntities.PolygonMapEntity.TYPE.CARPET ||
-                                e.type === mapEntities.PolygonMapEntity.TYPE.RAMP
+                                e.type === mapEntities.PolygonMapEntity.TYPE.RAMP ||
+                                (e.type === mapEntities.PolygonMapEntity.TYPE.LOW_CLEARANCE &&
+                                    !Array.isArray(additionalData.sneak_areas) && !Array.isArray(additionalData.sneak_areas_end))
                             ) {
                                 entities.push(e);
                             }
@@ -281,6 +290,7 @@ class DreameMapParser {
             }
 
             if (additionalData.vws) {
+                metaData.dreameVws = additionalData.vws;
                 if (Array.isArray(additionalData.vws.vwsl)) {
                     entities.push(
                         ...DreameMapParser.PARSE_LINES(
@@ -298,6 +308,35 @@ class DreameMapParser {
                             additionalData.vws.ramp
                         )
                     );
+                }
+            }
+
+            const lowAreas = additionalData.sneak_areas_end ?? additionalData.sneak_areas;
+            if (Array.isArray(lowAreas)) {
+                metaData.dreameLowClearance = lowAreas.map(area => area && ({
+                    id: area.id, type: area.type, hide: area.hide, roi: area.roi
+                }));
+                metaData.dreameLowClearanceEditable = lowAreas.every(area =>
+                    area && (area.type === 0 || area.type === 1) && !(area.type === 1 && area.hide) &&
+                    Array.isArray(area.roi) && area.roi.length >= 6 && area.roi.length % 2 === 0 &&
+                    (area.type !== 1 || area.roi.length === 8) &&
+                    area.roi.every(value => Number.isInteger(value) && value >= -32768 && value <= 32767)
+                );
+                for (const area of lowAreas) {
+                    if (!area || area.hide || !Array.isArray(area.roi) || area.roi.length < 6 || area.roi.length % 2 !== 0 ||
+                        !area.roi.every(Number.isFinite)) {
+                        continue;
+                    }
+                    const points = [];
+                    for (let i = 0; i < area.roi.length; i += 2) {
+                        const point = DreameMapParser.CONVERT_TO_VALETUDO_COORDINATES(area.roi[i], area.roi[i + 1]);
+                        points.push(point.x, point.y);
+                    }
+                    entities.push(new mapEntities.PolygonMapEntity({
+                        type: mapEntities.PolygonMapEntity.TYPE.LOW_CLEARANCE,
+                        points: points,
+                        metaData: {id: String(area.id), manual: area.type === 1, dreameRoi: area.roi}
+                    }));
                 }
             }
 

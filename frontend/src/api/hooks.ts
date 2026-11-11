@@ -154,6 +154,7 @@ import {
     fetchAutoEmptyDockAutoEmptyDurationControlProperties,
     fetchMapAnnotationsProperties,
     sendMapAnnotationsUpdate,
+    sendLowClearanceUpdate,
 } from "./client";
 import {
     PresetSelectionState,
@@ -1914,6 +1915,19 @@ export const useMapAnnotationsMutation = (
                 updatedAt: Date.now(),
             });
             await queryClient.invalidateQueries({ queryKey: [QueryKey.Map] });
+            await options?.onSuccess?.(data, ...args);
+        },
+    });
+};
+
+export const useLowClearanceMutation = (options?: UseMutationOptions<void, unknown, {areas: Array<Array<Point>>, expectedAreas: Array<Array<Point>>}>) => {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: sendLowClearanceUpdate,
+        onError: useOnCommandError(Capability.MapAnnotations),
+        ...options,
+        onSuccess: async (data, ...args) => {
+            await queryClient.invalidateQueries({queryKey: [QueryKey.Map]});
             await options?.onSuccess?.(data, ...args);
         },
     });
