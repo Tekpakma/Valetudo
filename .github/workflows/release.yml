@@ -1,6 +1,7 @@
 {
   'name': 'Release',
   'on': { 'release': { 'types': ['published'] } },
+  'permissions': { 'contents': 'write' },
   'jobs':
     {
       'publish-release':
