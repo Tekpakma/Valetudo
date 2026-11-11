@@ -2,6 +2,7 @@ const DreameMapParser = require("../DreameMapParser");
 const MapAnnotationsCapability = require("../../../core/capabilities/MapAnnotationsCapability");
 const RobotFirmwareError = require("../../../core/RobotFirmwareError");
 const ValetudoMapAnnotation = require("../../../entities/core/ValetudoMapAnnotation");
+const {sleep} = require("../../../utils/misc");
 
 /**
  * @extends MapAnnotationsCapability<import("../DreameValetudoRobot")>
@@ -134,6 +135,7 @@ class DreameMapAnnotationsCapability extends MapAnnotationsCapability {
         }
 
         const payloads = [];
+        let vwsWasApplied;
         if (this.lowClearanceSupported && dreamePayload.vws) {
             const existing = this.robot.state?.map?.metaData?.dreameVws;
             if (!existing || !Array.isArray(existing.vwsl) || !Array.isArray(existing.npthrsd) ||
@@ -156,14 +158,21 @@ class DreameMapAnnotationsCapability extends MapAnnotationsCapability {
                 .map(e => JSON.stringify(e.points.slice(0, 4))).sort();
             const curtainChanged = dreamePayload.curtain &&
                 differs(currentCurtains, normalize(dreamePayload.curtain.line));
-            if (vwsChanged && curtainChanged) {
-                throw new Error("Save threshold or ramp changes separately from curtain changes");
-            }
             if (vwsChanged) {
                 payloads.push({vws: {...existing, ...dreamePayload.vws}});
             }
             if (curtainChanged) {
                 payloads.push({curtain: dreamePayload.curtain});
+            }
+            if (vwsChanged && curtainChanged) {
+                const expectedLines = normalize(dreamePayload.vws.vwsl ?? []);
+                const expectedRamps = normalize(dreamePayload.vws.ramp ?? [], true);
+                vwsWasApplied = () => {
+                    const current = this.robot.state?.map?.metaData?.dreameVws;
+                    return current && Array.isArray(current.vwsl) && Array.isArray(current.ramp) &&
+                        !differs(normalize(current.vwsl), expectedLines) &&
+                        !differs(normalize(current.ramp, true), expectedRamps);
+                };
             }
         } else {
             payloads.push(dreamePayload);
@@ -183,6 +192,15 @@ class DreameMapAnnotationsCapability extends MapAnnotationsCapability {
             }
             if (res.out[0].value !== 0) {
                 throw new RobotFirmwareError("Got error " + res.out[0].value + " while saving map annotations");
+            }
+            if (payload.vws && vwsWasApplied) {
+                this.robot.pollMap();
+                for (let attempt = 0; attempt < 30 && !vwsWasApplied(); attempt++) {
+                    await sleep(500);
+                }
+                if (!vwsWasApplied()) {
+                    throw new RobotFirmwareError("Threshold update could not be verified; curtain changes were not sent. Refresh the map and retry.");
+                }
             }
         }
         this.robot.pollMap();

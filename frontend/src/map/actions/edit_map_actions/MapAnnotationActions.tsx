@@ -12,7 +12,7 @@ import {Box, Button, CircularProgress, Container, Grid2, Typography} from "@mui/
 import {ActionButton} from "../../Styled";
 import {PointCoordinates} from "../../utils/types";
 import {Add as AddIcon, Clear as ClearIcon, Refresh as RefreshIcon, Save as SaveIcon,} from "@mui/icons-material";
-import {AddCurtainIcon, AddRampIcon, AddThresholdIcon} from "../../../components/CustomIcons";
+import {AddCurtainIcon, AddLowClearanceIcon, AddRampIcon, AddThresholdIcon} from "../../../components/CustomIcons";
 import MapActionsCombinedActionsMenuPopoverButton from "../../MapActionsCombinedActionsMenuPopoverButton";
 import ThresholdClientStructure from "../../structures/client_structures/ThresholdClientStructure";
 import CurtainClientStructure from "../../structures/client_structures/CurtainClientStructure";
@@ -26,6 +26,7 @@ interface MapAnnotationActionsProperties {
     ramps: Array<RampClientStructure>,
     lowClearanceAreas: Array<LowClearanceClientStructure>,
     lowClearanceExpectedAreas: Array<Array<PointCoordinates>>,
+    originalAnnotations: Array<string>,
     lowClearanceEditable: boolean,
 
     convertPixelCoordinatesToCMSpace(coordinates: PointCoordinates) : PointCoordinates
@@ -72,28 +73,14 @@ const MapAnnotationActions = (
     } = useMapAnnotationsPropertiesQuery();
 
     const {
-        mutate: saveAnnotations,
+        mutateAsync: saveAnnotations,
         isPending: annotationsSaving
-    } = useMapAnnotationsMutation({
-        onSuccess: onSave,
-    });
+    } = useMapAnnotationsMutation();
     const canEdit = props.robotStatus.value === "docked";
-    const {mutate: saveLowClearance, isPending: lowClearanceSaving} = useLowClearanceMutation({onSuccess: onSave});
+    const {mutateAsync: saveLowClearance, isPending: lowClearanceSaving} = useLowClearanceMutation();
+    const saving = annotationsSaving || lowClearanceSaving;
 
-    const handleSaveLowClearance = React.useCallback(() => {
-        if (!canEdit || !props.lowClearanceEditable) {
-            return;
-        }
-        saveLowClearance({
-            areas: lowClearanceAreas.map(area => [
-                {x: area.x0, y: area.y0}, {x: area.x1, y: area.y1},
-                {x: area.x2, y: area.y2}, {x: area.x3, y: area.y3}
-            ].map(props.convertLowClearanceCoordinates)),
-            expectedAreas: props.lowClearanceExpectedAreas
-        });
-    }, [canEdit, props.lowClearanceEditable, props.lowClearanceExpectedAreas, props.convertLowClearanceCoordinates, saveLowClearance, lowClearanceAreas]);
-
-    const handleSaveClick = React.useCallback(() => {
+    const handleSaveClick = React.useCallback(async () => {
         if (!canEdit) {
             return;
         }
@@ -155,8 +142,32 @@ const MapAnnotationActions = (
             });
         });
 
-        saveAnnotations(mapAnnotations);
-    }, [canEdit, saveAnnotations, thresholds, curtains, ramps, convertPixelCoordinatesToCMSpace]);
+        const areas = lowClearanceAreas.map(area => [
+            {x: area.x0, y: area.y0}, {x: area.x1, y: area.y1},
+            {x: area.x2, y: area.y2}, {x: area.x3, y: area.y3}
+        ].map(props.convertLowClearanceCoordinates));
+        const normalize = (list: Array<Array<PointCoordinates>>) => list.map(a => JSON.stringify(a)).sort();
+        const lowClearanceChanged = props.lowClearanceEditable &&
+            JSON.stringify(normalize(areas)) !== JSON.stringify(normalize(props.lowClearanceExpectedAreas));
+        const currentAnnotations = mapAnnotations.map(annotation => JSON.stringify([
+            annotation.type, annotation.points.map(point => [point.x, point.y])
+        ])).sort();
+        const annotationsChanged = JSON.stringify(currentAnnotations) !== JSON.stringify(props.originalAnnotations);
+
+        try {
+            if (annotationsChanged) {
+                await saveAnnotations(mapAnnotations);
+            }
+            if (lowClearanceChanged) {
+                await saveLowClearance({areas: areas, expectedAreas: props.lowClearanceExpectedAreas});
+            }
+            onSave();
+        } catch {
+            // The mutation hooks report command errors; do not discard unsaved edits.
+        }
+    }, [canEdit, saveAnnotations, saveLowClearance, thresholds, curtains, ramps, lowClearanceAreas,
+        convertPixelCoordinatesToCMSpace, props.convertLowClearanceCoordinates, props.lowClearanceEditable,
+        props.lowClearanceExpectedAreas, props.originalAnnotations, onSave]);
 
     if (mapAnnotationsPropertiesLoadError) {
         return (
@@ -200,7 +211,7 @@ const MapAnnotationActions = (
                 canEdit &&
                 <Grid2>
                     <ActionButton
-                        disabled={annotationsSaving}
+                        disabled={saving}
                         color="inherit"
                         size="medium"
                         variant="extended"
@@ -208,7 +219,7 @@ const MapAnnotationActions = (
                     >
                         <SaveIcon style={{marginRight: "0.25rem", marginLeft: "-0.25rem"}}/>
                         Save
-                        {annotationsSaving && (
+                        {saving && (
                             <CircularProgress
                                 color="inherit"
                                 size={18}
@@ -224,7 +235,7 @@ const MapAnnotationActions = (
                 <MapActionsCombinedActionsMenuPopoverButton
                     icon={<AddIcon/>}
                     label="Add"
-                    disabled={annotationsSaving}
+                    disabled={saving}
                 >
                     {(close) => (
                         <>
@@ -279,6 +290,7 @@ const MapAnnotationActions = (
                                     onAddLowClearance();
                                     close();
                                 }}>
+                                    <AddLowClearanceIcon style={{marginRight: "0.25rem", marginLeft: "-0.25rem"}}/>
                                     Low-clearance area ({lowClearanceAreas.length})
                                 </ActionButton>
                             }
@@ -286,24 +298,15 @@ const MapAnnotationActions = (
                     )}
                 </MapActionsCombinedActionsMenuPopoverButton>
             }
-            {
-                canEdit && mapAnnotationsProperties.lowClearanceSupported &&
-                <Grid2>
-                    <ActionButton color="inherit" size="medium" variant="extended"
-                        disabled={!props.lowClearanceEditable || lowClearanceSaving}
-                        onClick={handleSaveLowClearance}>
-                        Save low-clearance areas
-                    </ActionButton>
-                    {!props.lowClearanceEditable && <Typography variant="caption">Waiting for complete low-clearance map data</Typography>}
-                </Grid2>
-            }
+            {canEdit && mapAnnotationsProperties.lowClearanceSupported && !props.lowClearanceEditable &&
+                <Grid2><Typography variant="caption">Waiting for complete low-clearance map data</Typography></Grid2>}
             {
                 canEdit &&
                 <Grid2>
                     <ActionButton
                         color="inherit"
                         size="medium"
-                        disabled={thresholds.length === 0 && curtains.length === 0 && ramps.length === 0}
+                        disabled={saving || (thresholds.length === 0 && curtains.length === 0 && ramps.length === 0 && lowClearanceAreas.length === 0)}
                         variant="extended"
                         onClick={onClear}
                     >
@@ -319,6 +322,7 @@ const MapAnnotationActions = (
                         color="inherit"
                         size="medium"
                         variant="extended"
+                        disabled={saving}
                         onClick={onRefresh}
                     >
                         <RefreshIcon style={{marginRight: "0.25rem", marginLeft: "-0.25rem"}}/>

@@ -46,14 +46,21 @@ test("clears thresholds without resending an unchanged curtain or losing other t
     assert.equal(calls[1], "poll");
 });
 
-test("rejects changing thresholds and curtains together before sending either", async () => {
+test("waits for the threshold update before sending a changed curtain", async () => {
     const {calls, capability} = setup({siid: 6, aiid: 2, code: 0, out: [{piid: 6, value: 0}]});
     capability.supportedAnnotationTypes = ["threshold", "curtain", "ramp"];
     capability.robot.state.map.metaData.dreameVws.vwsl = [[1504, -2159, 1556, -57, 0]];
-    await assert.rejects(capability.setMapAnnotations([
+    capability.robot.pollMap = function() {
+        calls.push("poll");
+        capability.robot.state.map.metaData.dreameVws.vwsl = [];
+    };
+    await capability.setMapAnnotations([
         {type: "curtain", points: [{x: 3385, y: 3435}, {x: 3385, y: 3475}]}
-    ]), /separately/);
-    assert.equal(calls.length, 0);
+    ]);
+    assert.ok(JSON.parse(calls[0].args.in[0].value).vws);
+    assert.equal(calls[1], "poll");
+    assert.ok(JSON.parse(calls[2].args.in[0].value).curtain);
+    assert.equal(calls[3], "poll");
 });
 
 test("does not edit areas or thresholds without complete map data", async () => {

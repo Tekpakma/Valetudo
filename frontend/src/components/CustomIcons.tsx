@@ -92,6 +92,12 @@ export const AddRampIcon = createSvgIcon(
     "addRamp"
 );
 
+// Low furniture with an add marker, matching the map annotation icons.
+export const AddLowClearanceIcon = createSvgIcon(
+    <path d="M2 5h18v3H2V5zm1 4h2v5H3zm14 0h2v3h-2zM5 12h9v2H5zm12 3v3h-3v2h3v3h2v-3h3v-2h-3v-3z"/>,
+    "addLowClearance"
+);
+
 
 export const FanSpeedOffIcon = createSvgIcon(
     <path

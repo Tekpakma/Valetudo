@@ -27,8 +27,6 @@ Without the annotation, it doesn't realize that that is the case.
 #### Low-clearance areas
 
 Purple areas mark low furniture. Dashed outlines are automatically detected and shown for reference; manually added areas can be moved, resized and deleted.
-Use **Save low-clearance areas** to save the complete set of manual areas separately from other annotations. The robot decides when to lower or raise its sensor.
-
-On supported robots, save changes to curtains separately from changes to thresholds or ramps.
+Use **Save** to apply changes. The robot decides when to lower or raise its sensor.
 
 `;

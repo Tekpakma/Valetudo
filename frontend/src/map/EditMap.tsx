@@ -57,6 +57,7 @@ interface EditMapState extends MapState {
 
 class EditMap extends BaseMap<EditMapProps, EditMapState> {
     private lowClearanceExpectedAreas: Array<Array<PointCoordinates>> = [];
+    private originalAnnotations: Array<string> = [];
     protected pendingVirtualRestrictionsStructuresUpdate = false;
     protected pendingMapAnnotationsStructuresUpdate = false;
 
@@ -136,7 +137,8 @@ class EditMap extends BaseMap<EditMapProps, EditMapState> {
                     case RawMapEntityType.Carpet:
                         return true;
                     case RawMapEntityType.LowClearance:
-                        return mode === "annotations" && e.metaData.manual !== true;
+                        return mode === "annotations" &&
+                            (e.metaData.manual !== true || this.props.rawMap.metaData.dreameLowClearanceEditable !== true);
                     default:
                         return false;
                 }
@@ -299,10 +301,18 @@ class EditMap extends BaseMap<EditMapProps, EditMapState> {
             this.lowClearanceExpectedAreas = this.props.rawMap.entities
                 .filter(e => e.type === RawMapEntityType.LowClearance && e.metaData.manual === true && e.points.length === 8)
                 .map(e => [0, 2, 4, 6].map(i => ({x: e.points[i], y: e.points[i + 1]})));
+            const pixelSize = this.props.rawMap.pixelSize;
+            this.originalAnnotations = this.props.rawMap.entities
+                .filter(e => [RawMapEntityType.Threshold, RawMapEntityType.Curtain, RawMapEntityType.Ramp].includes(e.type))
+                .map(e => JSON.stringify([e.type, Array.from({length: e.points.length / 2}, (_, i) => [
+                    Math.floor(e.points[i * 2] / pixelSize) * pixelSize,
+                    Math.floor(e.points[i * 2 + 1] / pixelSize) * pixelSize
+                ])])).sort();
             this.props.rawMap.entities.forEach(e => {
                 switch (e.type) {
                     case RawMapEntityType.LowClearance: {
-                        if (e.metaData.manual !== true || e.points.length !== 8) {
+                        if (e.metaData.manual !== true || e.points.length !== 8 ||
+                            this.props.rawMap.metaData.dreameLowClearanceEditable !== true) {
                             break;
                         }
                         // Keep sub-pixel coordinates so saving a different area does not shift this one.
@@ -646,6 +656,7 @@ class EditMap extends BaseMap<EditMapProps, EditMapState> {
                             ramps={this.state.ramps}
                             lowClearanceAreas={this.state.lowClearanceAreas}
                             lowClearanceExpectedAreas={this.lowClearanceExpectedAreas}
+                            originalAnnotations={this.originalAnnotations}
                             lowClearanceEditable={this.props.rawMap.metaData.dreameLowClearanceEditable === true}
                             convertLowClearanceCoordinates={(coordinates => ({
                                 x: Math.round(coordinates.x * this.props.rawMap.pixelSize),
