@@ -146,16 +146,18 @@ class DreameMapAnnotationsCapability extends MapAnnotationsCapability {
             }
             // V50 firmware may report success while ignoring VWS when sent with curtains.
             // Keep the firmware's other VWS fields, including non-passable thresholds.
+            const pixelSize = this.robot.state.map.pixelSize ?? 1;
+            const snap = coordinate => Math.floor(coordinate / pixelSize) * pixelSize;
             const normalize = (lines, withAngle = false) => lines.map(line => {
                 const a = DreameMapParser.CONVERT_TO_VALETUDO_COORDINATES(line[0], line[1]);
                 const b = DreameMapParser.CONVERT_TO_VALETUDO_COORDINATES(line[2], line[3]);
-                return JSON.stringify([a.x, a.y, b.x, b.y, ...(withAngle ? [line[4]] : [])]);
+                return JSON.stringify([snap(a.x), snap(a.y), snap(b.x), snap(b.y), ...(withAngle ? [line[4]] : [])]);
             }).sort();
             const differs = (a, b) => JSON.stringify(a) !== JSON.stringify(b);
             const vwsChanged = differs(normalize(existing.vwsl), normalize(dreamePayload.vws.vwsl ?? [])) ||
                 differs(normalize(existing.ramp, true), normalize(dreamePayload.vws.ramp ?? [], true));
             const currentCurtains = this.robot.state.map.entities.filter(e => e.type === "curtain")
-                .map(e => JSON.stringify(e.points.slice(0, 4))).sort();
+                .map(e => JSON.stringify(e.points.slice(0, 4).map(snap))).sort();
             const curtainChanged = dreamePayload.curtain &&
                 differs(currentCurtains, normalize(dreamePayload.curtain.line));
             if (vwsChanged) {

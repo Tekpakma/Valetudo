@@ -46,6 +46,27 @@ test("clears thresholds without resending an unchanged curtain or losing other t
     assert.equal(calls[1], "poll");
 });
 
+test("does not resend an unchanged curtain whose coordinates fall between map pixels", async () => {
+    const {calls, capability} = setup({siid: 6, aiid: 2, code: 0, out: [{piid: 6, value: 0}]});
+    capability.supportedAnnotationTypes = ["threshold", "curtain", "ramp"];
+    capability.robot.state.map.pixelSize = 5;
+    capability.robot.state.map.metaData.dreameVws.vwsl = [[1504, -2159, 1556, -57, 0]];
+    capability.robot.state.map.entities = [{type: "curtain", points: [3387, 3437, 3388, 3478]}];
+    await capability.setMapAnnotations([{type: "curtain", points: [{x: 3385, y: 3435}, {x: 3385, y: 3475}]}]);
+    assert.equal(calls.length, 2);
+    assert.ok(JSON.parse(calls[0].args.in[0].value).vws);
+    assert.equal(calls[1], "poll");
+});
+
+test("does not resend an unchanged threshold whose coordinates fall between map pixels", async () => {
+    const {calls, capability} = setup({siid: 6, aiid: 2, code: 0, out: [{piid: 6, value: 0}]});
+    capability.supportedAnnotationTypes = ["threshold", "curtain", "ramp"];
+    capability.robot.state.map.pixelSize = 5;
+    capability.robot.state.map.metaData.dreameVws.vwsl = [[1504, -2159, 1556, -57, 0]];
+    await capability.setMapAnnotations([{type: "threshold", points: [{x: 3425, y: 3490}, {x: 3430, y: 3280}]}]);
+    assert.deepEqual(calls, ["poll"]);
+});
+
 test("waits for the threshold update before sending a changed curtain", async () => {
     const {calls, capability} = setup({siid: 6, aiid: 2, code: 0, out: [{piid: 6, value: 0}]});
     capability.supportedAnnotationTypes = ["threshold", "curtain", "ramp"];
