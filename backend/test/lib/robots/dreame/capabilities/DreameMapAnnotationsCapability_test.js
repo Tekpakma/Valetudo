@@ -208,4 +208,20 @@ describe("DreameMapAnnotationsCapability", () => {
         assert.ok(JSON.parse(calls[2].args.in[0].value).curtain);
         assert.strictEqual(calls[3], "poll");
     });
+
+    it("sends one command per annotation type without incremental updates", async () => {
+        capability.incrementalUpdates = false;
+
+        await capability.setMapAnnotations([
+            {type: "curtain", points: [{x: 3385, y: 3435}, {x: 3385, y: 3475}]}
+        ]);
+
+        assert.deepStrictEqual(
+            calls.slice(0, 2).map(call => {
+                return Object.keys(JSON.parse(call.args.in[0].value));
+            }),
+            [["vws"], ["curtain"]]
+        );
+        assert.deepStrictEqual(calls.slice(2), ["poll"]);
+    });
 });

@@ -136,16 +136,19 @@ class DreameMapAnnotationsCapability extends MapAnnotationsCapability {
         if (this.incrementalUpdates && dreamePayload.vws !== undefined) {
             await this.setMapAnnotationsIncrementally(dreamePayload);
         } else {
-            await this.sendMapEdit(dreamePayload);
+            // Newer firmwares demand one command per map annotation type
+            for (const [key, value] of Object.entries(dreamePayload)) {
+                await this.sendMapEdit({[key]: value});
+            }
         }
 
         this.robot.pollMap();
     }
 
     /**
-     * Some firmwares (e.g. the one of the Mova V50) report success but silently ignore vws changes if they
-     * are sent together with curtains. Furthermore, sending vws replaces all of it, including parts not
-     * managed by Valetudo such as impassable thresholds.
+     * Sending vws replaces all of it, including parts not managed by Valetudo such as impassable thresholds.
+     * Furthermore, some firmwares (e.g. the one of the Mova V50) report success but silently ignore vws changes
+     * if they are sent together with or right before curtains.
      *
      * Therefore, this only sends what actually changed, merges the vws changes into what is already on the robot
      * and waits for the vws change to be applied before sending curtain changes
